@@ -8,27 +8,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-jobs:
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+permissions:
+  contents: write
 
+jobs:
   build:
     name: Build ${{ matrix.target }}
-    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -111,46 +96,36 @@ jobs:
           certutil -hashfile vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip SHA256 | findstr /V ":" | findstr /V "Hashing" > vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
         shell: powershell
 
-      - name: Upload archive (Unix)
-        if: runner.os != 'Windows'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
-          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
-          asset_content_type: application/gzip
+          name: ${{ matrix.target }}
+          path: |
+            vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.*
 
-      - name: Upload checksum (Unix)
-        if: runner.os != 'Windows'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
-          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
-          asset_content_type: text/plain
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Upload archive (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip
-          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip
-          asset_content_type: application/zip
+          path: artifacts
 
-      - name: Upload checksum (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-release-asset@v1
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          find artifacts -type f -exec cp {} release-files/ \;
+          ls -la release-files/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
-          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
-          asset_content_type: text/plain

@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            use_cross: false
+            archive_ext: tar.gz
+
+          # Linux ARM64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+            archive_ext: tar.gz
+
+          # Windows x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            use_cross: false
+            archive_ext: zip
+
+          # macOS Intel
+          - os: macos-13
+            target: x86_64-apple-darwin
+            use_cross: false
+            archive_ext: tar.gz
+
+          # macOS ARM64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            use_cross: false
+            archive_ext: tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          strip target/${{ matrix.target }}/release/vcd_tools_rs || true
+          strip target/${{ matrix.target }}/release/vcd2trace || true
+        shell: bash
+
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/vcd_tools_rs vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}/
+          cp target/${{ matrix.target }}/release/vcd2trace vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}/
+          tar czf vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}/
+          sha256sum vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+        shell: bash
+
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}
+          copy target\${{ matrix.target }}\release\vcd_tools_rs.exe vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}\
+          copy target\${{ matrix.target }}\release\vcd2trace.exe vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}\
+          powershell Compress-Archive -Path vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }} -DestinationPath vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip
+          certutil -hashfile vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip SHA256 | findstr /V ":" | findstr /V "Hashing" > vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
+        shell: powershell
+
+      - name: Upload archive (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload checksum (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+          asset_content_type: text/plain
+
+      - name: Upload archive (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip
+          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip
+          asset_content_type: application/zip
+
+      - name: Upload checksum (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
+          asset_name: vcd_tools_rs-${{ github.ref_name }}-${{ matrix.target }}.zip.sha256
+          asset_content_type: text/plain

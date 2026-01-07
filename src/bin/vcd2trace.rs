@@ -132,7 +132,53 @@ fn value_to_bool(val: &ChangeValue) -> Option<bool> {
 fn value_to_u64(val: &ChangeValue) -> Option<u64> {
     match val {
         ChangeValue::Integer(i) => Some(*i as u64),
-        ChangeValue::Text(t) => t.trim().parse::<u64>().ok(),
+        ChangeValue::Text(t) => {
+            let s = t.trim();
+            if s.starts_with("0x") || s.starts_with("0X") {
+                u64::from_str_radix(&s[2..], 16).ok()
+            } else {
+                s.parse::<u64>().ok()
+            }
+        }
+        ChangeValue::Float(_) => None,
+    }
+}
+
+fn binary_to_hex_with_x(binary: &str, width_bits: usize) -> String {
+    // Pad to desired width with leading zeros
+    let padded = format!("{:0>width$}", binary, width = width_bits);
+
+    // Group into nibbles (4 bits) from right to left
+    let mut hex_chars = Vec::new();
+    for chunk in padded.as_bytes().rchunks(4) {
+        let nibble = std::str::from_utf8(chunk).unwrap();
+        if nibble.contains('x') || nibble.contains('X') || nibble.contains('z') || nibble.contains('Z') {
+            hex_chars.push('X');
+        } else {
+            // Convert 4-bit binary to hex
+            let val = u8::from_str_radix(nibble, 2).unwrap_or(0);
+            hex_chars.push(std::char::from_digit(val as u32, 16).unwrap().to_ascii_uppercase());
+        }
+    }
+
+    hex_chars.reverse();
+    format!("0x{}", hex_chars.iter().collect::<String>())
+}
+
+fn value_to_hex_string(val: &ChangeValue) -> Option<String> {
+    match val {
+        ChangeValue::Integer(i) => Some(format!("0x{:08x}", *i as u64)),
+        ChangeValue::Text(t) => {
+            let s = t.trim();
+            // Check for unknown bits FIRST before treating as hex literal
+            if s.contains('x') || s.contains('X') || s.contains('z') || s.contains('Z') {
+                Some(binary_to_hex_with_x(s, 32))
+            } else if s.starts_with("0x") || s.starts_with("0X") {
+                Some(format!("0x{:08x}", u64::from_str_radix(&s[2..], 16).ok()?))
+            } else {
+                Some(format!("0x{:08x}", s.parse::<u64>().ok()?))
+            }
+        }
         ChangeValue::Float(_) => None,
     }
 }
@@ -173,18 +219,18 @@ fn process_cycle(
         .unwrap_or(false);
 
     if rf_we_qual {
-        if let (Some(addr), Some(data)) = (
+        if let (Some(addr), Some(data_hex)) = (
             state.get(&paths.rd_addr).and_then(value_to_u64),
-            state.get(&paths.rd_wdata).and_then(value_to_u64),
+            state.get(&paths.rd_wdata).and_then(value_to_hex_string),
         ) {
-            writeln!(out, "x{addr:02} <= 0x{data:08x}")?;
+            writeln!(out, "x{addr:02} <= {data_hex}")?;
         }
     } else if rf_we_lsu {
-        if let (Some(addr), Some(data)) = (
+        if let (Some(addr), Some(data_hex)) = (
             state.get(&paths.rd_addr).and_then(value_to_u64),
-            state.get(&paths.rd_wdata_lsu).and_then(value_to_u64),
+            state.get(&paths.rd_wdata_lsu).and_then(value_to_hex_string),
         ) {
-            writeln!(out, "x{addr:02} <= 0x{data:08x}")?;
+            writeln!(out, "x{addr:02} <= {data_hex}")?;
         }
     }
 
@@ -252,6 +298,7 @@ fn main() -> Result<()> {
             }
         }
 
+        // Process cycle with state BEFORE updates (to get rd_wdata from before clock edge)
         if rising {
             if *started {
                 process_cycle(&paths, state, out)?;
@@ -260,6 +307,7 @@ fn main() -> Result<()> {
             }
         }
 
+        // Now update state with new values
         for evt in buffer.drain(..) {
             if evt.signal == paths.clk {
                 *prev_clk = value_to_bool(&evt.value);

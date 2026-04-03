@@ -603,6 +603,311 @@ pub fn format_value_for_signal(value: &ChangeValue, signal_size: u32) -> String 
     value.to_string()
 }
 
+/// Format a ChangeValue for display (simple conversion)
+pub fn format_change_value(value: &ChangeValue) -> String {
+    value.to_string()
+}
+
 pub fn build_sizes(signals: &[Signal]) -> HashMap<String, u32> {
     signals.iter().map(|s| (s.name.clone(), s.size)).collect()
 }
+
+// ============================================================================
+// VCD Comparison
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SignalMismatch {
+    pub signal_name: String,
+    pub time: u64,
+    pub value1: ChangeValue,
+    pub value2: ChangeValue,
+    pub is_unknown: bool,  // true if one value is 'x' or 'z'
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComparisonOptions {
+    pub max_mismatches: Option<usize>,  // Limit number of mismatches per signal
+    pub signals_only: Vec<String>,      // Only compare these signals
+    pub ignore_unknown: bool,            // Treat x/z differences as matches
+    pub time_window: TimeWindow,          // Only compare within this time range
+}
+
+impl Default for ComparisonOptions {
+    fn default() -> Self {
+        Self {
+            max_mismatches: None,
+            signals_only: Vec::new(),
+            ignore_unknown: false,
+            time_window: TimeWindow { start: None, end: None },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComparisonResult {
+    pub file1: String,
+    pub file2: String,
+    pub common_signals: Vec<String>,
+    pub signals_only_in_file1: Vec<String>,
+    pub signals_only_in_file2: Vec<String>,
+    pub mismatches: Vec<SignalMismatch>,
+    pub total_mismatches: usize,
+    pub signals_with_mismatches: usize,
+    pub passed: bool,
+}
+
+impl ComparisonResult {
+    pub fn get_summary(&self) -> String {
+        if self.passed {
+            format!("✅ PASS - All {} common signals match", self.common_signals.len())
+        } else {
+            format!(
+                "❌ FAIL - {}/{} signals have mismatches ({} total mismatches)",
+                self.signals_with_mismatches,
+                self.common_signals.len(),
+                self.total_mismatches
+            )
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct JsonComparisonResult {
+    pub file1: String,
+    pub file2: String,
+    pub common_signal_count: usize,
+    pub signals_only_in_file1: Vec<String>,
+    pub signals_only_in_file2: Vec<String>,
+    pub mismatches_by_signal: std::collections::HashMap<String, usize>,
+    pub total_mismatches: usize,
+    pub signals_with_mismatches: usize,
+    pub passed: bool,
+}
+
+impl From<&ComparisonResult> for JsonComparisonResult {
+    fn from(result: &ComparisonResult) -> Self {
+        let mut mismatches_by_signal = std::collections::HashMap::new();
+        for mismatch in &result.mismatches {
+            *mismatches_by_signal.entry(mismatch.signal_name.clone()).or_insert(0) += 1;
+        }
+
+        Self {
+            file1: result.file1.clone(),
+            file2: result.file2.clone(),
+            common_signal_count: result.common_signals.len(),
+            signals_only_in_file1: result.signals_only_in_file1.clone(),
+            signals_only_in_file2: result.signals_only_in_file2.clone(),
+            mismatches_by_signal,
+            total_mismatches: result.total_mismatches,
+            signals_with_mismatches: result.signals_with_mismatches,
+            passed: result.passed,
+        }
+    }
+}
+
+fn normalize_value(value: &ChangeValue) -> String {
+    match value {
+        ChangeValue::Integer(i) => {
+            // For comparison, normalize integers without leading zeros
+            i.to_string()
+        }
+        ChangeValue::Float(f) => f.to_string(),
+        ChangeValue::Text(t) => t.to_lowercase(),  // Normalize x, z, etc.
+    }
+}
+
+fn values_match(val1: &ChangeValue, val2: &ChangeValue, ignore_unknown: bool) -> bool {
+    let norm1 = normalize_value(val1);
+    let norm2 = normalize_value(val2);
+
+    // Check for unknown values
+    let is_unknown = norm1 == "x" || norm1 == "z" || norm2 == "x" || norm2 == "z";
+
+    if ignore_unknown && is_unknown {
+        return true;
+    }
+
+    norm1 == norm2
+}
+
+pub fn compare_vcd_files(
+    file1: &str,
+    file2: &str,
+    options: &ComparisonOptions,
+) -> Result<ComparisonResult> {
+    // Read both VCD files
+    let (signals1, index1, _timescale1, _offset1) = read_signals_with_offset(file1)?;
+    let (signals2, index2, _timescale2, _offset2) = read_signals_with_offset(file2)?;
+
+    // Find common signals by name
+    let mut common_signals = Vec::new();
+    let mut signals_only_in_1 = Vec::new();
+    let mut signals_only_in_2 = Vec::new();
+
+    let signal_names1: std::collections::HashSet<String> =
+        signals1.iter().map(|s| s.name.clone()).collect();
+    let signal_names2: std::collections::HashSet<String> =
+        signals2.iter().map(|s| s.name.clone()).collect();
+
+    for sig in &signals1 {
+        if signal_names2.contains(&sig.name) {
+            common_signals.push(sig.name.clone());
+        } else {
+            signals_only_in_1.push(sig.name.clone());
+        }
+    }
+
+    for sig in &signals2 {
+        if !signal_names1.contains(&sig.name) {
+            signals_only_in_2.push(sig.name.clone());
+        }
+    }
+
+    common_signals.sort();
+
+    // Filter to specific signals if requested
+    let signals_to_compare = if options.signals_only.is_empty() {
+        common_signals.clone()
+    } else {
+        common_signals
+            .iter()
+            .filter(|s| options.signals_only.contains(s))
+            .cloned()
+            .collect()
+    };
+
+    // Build time-value maps for comparison
+    let mut values1: std::collections::HashMap<String, Vec<(u64, ChangeValue)>> =
+        std::collections::HashMap::new();
+    let mut values2: std::collections::HashMap<String, Vec<(u64, ChangeValue)>> =
+        std::collections::HashMap::new();
+
+    // Read values from file1
+    for signal_name in &signals_to_compare {
+        if index1.by_name.contains_key(signal_name) {
+            let targets = vec![signal_name.clone()];
+            let (target_map, _) = build_target_map(&index1, &targets);
+
+            let mut file = File::open(file1)?;
+            file.seek(SeekFrom::Start(_offset1))?;
+            let reader = BufReader::new(file);
+            let parser = Parser::new(reader);
+            let iter = TimeValueIter::new(parser, target_map, options.time_window.clone());
+
+            let time_values: Vec<(u64, ChangeValue)> = iter
+                .filter_map(|tv| tv.ok())
+                .map(|tv| (tv.time, tv.value))
+                .collect();
+
+            values1.insert(signal_name.clone(), time_values);
+        }
+    }
+
+    // Read values from file2
+    for signal_name in &signals_to_compare {
+        if index2.by_name.contains_key(signal_name) {
+            let targets = vec![signal_name.clone()];
+            let (target_map, _) = build_target_map(&index2, &targets);
+
+            let mut file = File::open(file2)?;
+            file.seek(SeekFrom::Start(_offset2))?;
+            let reader = BufReader::new(file);
+            let parser = Parser::new(reader);
+            let iter = TimeValueIter::new(parser, target_map, options.time_window.clone());
+
+            let time_values: Vec<(u64, ChangeValue)> = iter
+                .filter_map(|tv| tv.ok())
+                .map(|tv| (tv.time, tv.value))
+                .collect();
+
+            values2.insert(signal_name.clone(), time_values);
+        }
+    }
+
+    // Compare signals
+    let mut all_mismatches = Vec::new();
+    let mut signals_with_mismatches = 0;
+
+    for signal_name in &signals_to_compare {
+        let empty: Vec<(u64, ChangeValue)> = Vec::new();
+        let times1 = values1.get(signal_name).unwrap_or(&empty);
+        let times2 = values2.get(signal_name).unwrap_or(&empty);
+
+        // Collect all time points
+        let mut all_times: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        for (time, _) in times1 {
+            all_times.insert(*time);
+        }
+        for (time, _) in times2 {
+            all_times.insert(*time);
+        }
+
+        // Get last value before/at each time point
+        let mut signal_mismatches = 0;
+
+        for time in all_times {
+            // Find most recent value at or before this time
+            let val1_at_time = times1
+                .iter()
+                .rev()
+                .find(|(t, _)| *t <= time)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| ChangeValue::Text("x".to_string()));
+
+            let val2_at_time = times2
+                .iter()
+                .rev()
+                .find(|(t, _)| *t <= time)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| ChangeValue::Text("x".to_string()));
+
+            if !values_match(&val1_at_time, &val2_at_time, options.ignore_unknown) {
+                let is_unknown = matches!(
+                    &val1_at_time,
+                    ChangeValue::Text(s) if s == "x" || s == "z"
+                ) || matches!(
+                    &val2_at_time,
+                    ChangeValue::Text(s) if s == "x" || s == "z"
+                );
+
+                all_mismatches.push(SignalMismatch {
+                    signal_name: signal_name.clone(),
+                    time,
+                    value1: val1_at_time.clone(),
+                    value2: val2_at_time.clone(),
+                    is_unknown,
+                });
+
+                signal_mismatches += 1;
+
+                // Apply max_mismatches limit if set
+                if let Some(max) = options.max_mismatches {
+                    if signal_mismatches >= max {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if signal_mismatches > 0 {
+            signals_with_mismatches += 1;
+        }
+    }
+
+    let passed = all_mismatches.is_empty();
+    let total_mismatches = all_mismatches.len();
+
+    Ok(ComparisonResult {
+        file1: file1.to_string(),
+        file2: file2.to_string(),
+        common_signals,
+        signals_only_in_file1: signals_only_in_1,
+        signals_only_in_file2: signals_only_in_2,
+        mismatches: all_mismatches,
+        total_mismatches,
+        signals_with_mismatches,
+        passed,
+    })
+}
+

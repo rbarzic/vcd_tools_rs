@@ -9,6 +9,7 @@ use vcd_tools_rs::{
     TimeValue, TimeWindow, VcdError, build_sizes, build_target_map, find_nth_occurrence,
     format_value_for_signal, list_signals, load_signal_list, parse_target_value, read_signals,
     read_signals_with_offset, read_vcd_metadata,
+    compare_vcd_files, ComparisonOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -76,6 +77,30 @@ enum Commands {
         start: Option<u64>,
         #[arg(long, help = "End time (inclusive)")]
         end: Option<u64>,
+    },
+    /// Compare two VCD files and report differences
+    Compare {
+        reference: PathBuf,
+        actual: PathBuf,
+        #[arg(long, help = "Limit number of mismatches per signal")]
+        max_mismatches: Option<usize>,
+        #[arg(long, help = "Only compare specific signals (comma-separated)")]
+        signals_only: Option<String>,
+        #[arg(
+            long,
+            action = ArgAction::SetTrue,
+            help = "Ignore x/z differences when comparing"
+        )]
+        ignore_unknown: bool,
+        #[arg(long, help = "Start time (inclusive)")]
+        start: Option<u64>,
+        #[arg(long, help = "End time (inclusive)")]
+        end: Option<u64>,
+        #[arg(
+            long,
+            help = "Output format (default, json, compact)"
+        )]
+        output: Option<String>,
     },
 }
 
@@ -337,5 +362,155 @@ fn main() -> Result<()> {
             let window = TimeWindow { start, end };
             handle_find(&vcd, signal, value, occurrence, window, cli.pretty)
         }
+        Commands::Compare {
+            reference,
+            actual,
+            max_mismatches,
+            signals_only,
+            ignore_unknown,
+            start,
+            end,
+            output,
+        } => {
+            let options = ComparisonOptions {
+                max_mismatches,
+                signals_only: signals_only
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                ignore_unknown,
+                time_window: TimeWindow { start, end },
+            };
+
+            let result = compare_vcd_files(
+                reference.to_str().unwrap_or("reference.vcd"),
+                actual.to_str().unwrap_or("actual.vcd"),
+                &options,
+            )?;
+
+            handle_compare(&result, output.as_deref())
+        }
     }
+}
+
+fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option<&str>) -> Result<()> {
+    let format = output_format.unwrap_or("default");
+
+    match format {
+        "json" => {
+            // JSON output format
+            let json_result = vcd_tools_rs::JsonComparisonResult::from(result);
+            let json = serde_json::to_string_pretty(&json_result)
+                .map_err(|e| anyhow::anyhow!("JSON serialization error: {}", e))?;
+            println!("{}", json);
+        }
+        "compact" => {
+            // Compact single-line output
+            if result.passed {
+                println!("✅ PASS: All {} signals match", result.common_signals.len());
+            } else {
+                println!("❌ FAIL: {}/{} signals have mismatches ({} total)",
+                    result.signals_with_mismatches,
+                    result.common_signals.len(),
+                    result.total_mismatches);
+            }
+        }
+        _ => {
+            // Default detailed format
+            println!("==========================================");
+            println!("VCD Comparison Results");
+            println!("==========================================");
+            println!();
+            println!("Reference: {}", result.file1);
+            println!("Actual:    {}", result.file2);
+            println!();
+
+            if !result.signals_only_in_file1.is_empty() {
+                println!("Signals only in reference:");
+                for sig in &result.signals_only_in_file1 {
+                    println!("  - {}", sig);
+                }
+                println!();
+            }
+
+            if !result.signals_only_in_file2.is_empty() {
+                println!("Signals only in actual:");
+                for sig in &result.signals_only_in_file2 {
+                    println!("  - {}", sig);
+                }
+                println!();
+            }
+
+            println!("Common signals: {}", result.common_signals.len());
+            println!();
+
+            if result.common_signals.is_empty() {
+                println!("⚠️  No common signals to compare!");
+                return Ok(());
+            }
+
+            println!("==========================================");
+            println!("Signal Value Comparison");
+            println!("==========================================");
+            println!();
+
+            // Group mismatches by signal
+            let mut mismatches_by_signal: std::collections::HashMap<&String, Vec<&vcd_tools_rs::SignalMismatch>> =
+                std::collections::HashMap::new();
+            for mm in &result.mismatches {
+                mismatches_by_signal
+                    .entry(&mm.signal_name)
+                    .or_insert_with(Vec::new)
+                    .push(mm);
+            }
+
+            for signal_name in &result.common_signals {
+                if let Some(mismatches) = mismatches_by_signal.get(signal_name) {
+                    println!("Signal: {}", signal_name);
+                    for mm in mismatches.iter().take(10) {
+                        let val1_str = vcd_tools_rs::format_change_value(&mm.value1);
+                        let val2_str = vcd_tools_rs::format_change_value(&mm.value2);
+                        let status = if mm.is_unknown {
+                            "(one or both unknown)"
+                        } else {
+                            "❌ MISMATCH"
+                        };
+                        println!("  Time #{}: Ref='{}' | Actual='{}' {}",
+                            mm.time, val1_str, val2_str, status);
+                    }
+                    if mismatches.len() > 10 {
+                        println!("  ... and {} more", mismatches.len() - 10);
+                    }
+                    println!("  ❌ {} mismatches", mismatches.len());
+                } else {
+                    println!("Signal: {}", signal_name);
+                    println!("  ✅ All values match");
+                }
+                println!();
+            }
+
+            println!("==========================================");
+            println!("Summary");
+            println!("==========================================");
+            println!();
+
+            if result.passed {
+                println!("✅ SUCCESS: All signal values match!");
+                println!();
+                println!("The two VCD files are equivalent.");
+            } else {
+                println!("❌ FAILURES FOUND");
+                println!();
+                println!("Total mismatches: {}", result.total_mismatches);
+                println!("Signals with mismatches: {} / {}",
+                    result.signals_with_mismatches,
+                    result.common_signals.len());
+            }
+            println!();
+        }
+    }
+
+    Ok(())
 }

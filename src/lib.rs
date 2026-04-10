@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
@@ -373,6 +373,7 @@ pub struct TimeValueIter<R: BufRead> {
     window: TimeWindow,
     current_time: u64,
     finished: bool,
+    pending: VecDeque<TimeValue>,
 }
 
 impl<R: BufRead> TimeValueIter<R> {
@@ -387,6 +388,7 @@ impl<R: BufRead> TimeValueIter<R> {
             window,
             current_time: 0,
             finished: false,
+            pending: VecDeque::new(),
         }
     }
 }
@@ -395,6 +397,10 @@ impl<R: BufRead> Iterator for TimeValueIter<R> {
     type Item = Result<TimeValue>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if let Some(tv) = self.pending.pop_front() {
+            return Some(Ok(tv));
+        }
+
         if self.finished {
             return None;
         }
@@ -423,11 +429,13 @@ impl<R: BufRead> Iterator for TimeValueIter<R> {
                                 continue;
                             }
                             for name in names {
-                                let tv = TimeValue {
+                                self.pending.push_back(TimeValue {
                                     signal: name.clone(),
                                     time: self.current_time,
                                     value: value.clone(),
-                                };
+                                });
+                            }
+                            if let Some(tv) = self.pending.pop_front() {
                                 return Some(Ok(tv));
                             }
                         }
@@ -718,17 +726,97 @@ fn normalize_value(value: &ChangeValue) -> String {
 }
 
 fn values_match(val1: &ChangeValue, val2: &ChangeValue, ignore_unknown: bool) -> bool {
-    let norm1 = normalize_value(val1);
-    let norm2 = normalize_value(val2);
-
-    // Check for unknown values
-    let is_unknown = norm1 == "x" || norm1 == "z" || norm2 == "x" || norm2 == "z";
-
-    if ignore_unknown && is_unknown {
+    if ignore_unknown && (is_unknown_value(val1) || is_unknown_value(val2)) {
         return true;
     }
 
-    norm1 == norm2
+    match (val1, val2) {
+        (ChangeValue::Integer(a), ChangeValue::Integer(b)) => a == b,
+        (ChangeValue::Float(a), ChangeValue::Float(b)) => a.to_bits() == b.to_bits(),
+        (ChangeValue::Text(a), ChangeValue::Text(b)) => a.eq_ignore_ascii_case(b),
+        _ => normalize_value(val1) == normalize_value(val2),
+    }
+}
+
+fn is_unknown_value(value: &ChangeValue) -> bool {
+    matches!(value, ChangeValue::Text(s) if s.eq_ignore_ascii_case("x") || s.eq_ignore_ascii_case("z"))
+}
+
+fn collect_signal_values(
+    file: &str,
+    index: &SignalIndex,
+    offset: u64,
+    signals: &[String],
+    window: TimeWindow,
+) -> Result<HashMap<String, Vec<(u64, ChangeValue)>>> {
+    let (target_map, _missing) = build_target_map(index, signals);
+
+    let mut values: HashMap<String, Vec<(u64, ChangeValue)>> =
+        HashMap::with_capacity(signals.len());
+    for signal_name in signals {
+        values.insert(signal_name.clone(), Vec::new());
+    }
+
+    let iter = time_value_iter_from_body(file, target_map, window, offset)?;
+    for tv in iter {
+        let tv = tv?;
+        if let Some(entries) = values.get_mut(&tv.signal) {
+            entries.push((tv.time, tv.value));
+        }
+    }
+    Ok(values)
+}
+
+fn compare_signal_timeline(
+    signal_name: &str,
+    times1: &[(u64, ChangeValue)],
+    times2: &[(u64, ChangeValue)],
+    options: &ComparisonOptions,
+    all_mismatches: &mut Vec<SignalMismatch>,
+) -> usize {
+    let mut i = 0usize;
+    let mut j = 0usize;
+    let mut curr1 = ChangeValue::Text("x".to_string());
+    let mut curr2 = ChangeValue::Text("x".to_string());
+    let mut signal_mismatches = 0usize;
+
+    while i < times1.len() || j < times2.len() {
+        let t1 = times1.get(i).map(|(t, _)| *t).unwrap_or(u64::MAX);
+        let t2 = times2.get(j).map(|(t, _)| *t).unwrap_or(u64::MAX);
+        let t = t1.min(t2);
+        if t == u64::MAX {
+            break;
+        }
+
+        while i < times1.len() && times1[i].0 == t {
+            curr1 = times1[i].1.clone();
+            i += 1;
+        }
+        while j < times2.len() && times2[j].0 == t {
+            curr2 = times2[j].1.clone();
+            j += 1;
+        }
+
+        if !values_match(&curr1, &curr2, options.ignore_unknown) {
+            let is_unknown = is_unknown_value(&curr1) || is_unknown_value(&curr2);
+            all_mismatches.push(SignalMismatch {
+                signal_name: signal_name.to_string(),
+                time: t,
+                value1: curr1.clone(),
+                value2: curr2.clone(),
+                is_unknown,
+            });
+            signal_mismatches += 1;
+
+            if let Some(max) = options.max_mismatches {
+                if signal_mismatches >= max {
+                    break;
+                }
+            }
+        }
+    }
+
+    signal_mismatches
 }
 
 pub fn compare_vcd_files(
@@ -745,10 +833,8 @@ pub fn compare_vcd_files(
     let mut signals_only_in_1 = Vec::new();
     let mut signals_only_in_2 = Vec::new();
 
-    let signal_names1: std::collections::HashSet<String> =
-        signals1.iter().map(|s| s.name.clone()).collect();
-    let signal_names2: std::collections::HashSet<String> =
-        signals2.iter().map(|s| s.name.clone()).collect();
+    let signal_names1: HashSet<String> = signals1.iter().map(|s| s.name.clone()).collect();
+    let signal_names2: HashSet<String> = signals2.iter().map(|s| s.name.clone()).collect();
 
     for sig in &signals1 {
         if signal_names2.contains(&sig.name) {
@@ -770,60 +856,29 @@ pub fn compare_vcd_files(
     let signals_to_compare = if options.signals_only.is_empty() {
         common_signals.clone()
     } else {
+        let wanted: HashSet<&String> = options.signals_only.iter().collect();
         common_signals
             .iter()
-            .filter(|s| options.signals_only.contains(s))
+            .filter(|s| wanted.contains(*s))
             .cloned()
             .collect()
     };
 
-    // Build time-value maps for comparison
-    let mut values1: std::collections::HashMap<String, Vec<(u64, ChangeValue)>> =
-        std::collections::HashMap::new();
-    let mut values2: std::collections::HashMap<String, Vec<(u64, ChangeValue)>> =
-        std::collections::HashMap::new();
-
-    // Read values from file1
-    for signal_name in &signals_to_compare {
-        if index1.by_name.contains_key(signal_name) {
-            let targets = vec![signal_name.clone()];
-            let (target_map, _) = build_target_map(&index1, &targets);
-
-            let mut file = File::open(file1)?;
-            file.seek(SeekFrom::Start(_offset1))?;
-            let reader = BufReader::new(file);
-            let parser = Parser::new(reader);
-            let iter = TimeValueIter::new(parser, target_map, options.time_window.clone());
-
-            let time_values: Vec<(u64, ChangeValue)> = iter
-                .filter_map(|tv| tv.ok())
-                .map(|tv| (tv.time, tv.value))
-                .collect();
-
-            values1.insert(signal_name.clone(), time_values);
-        }
-    }
-
-    // Read values from file2
-    for signal_name in &signals_to_compare {
-        if index2.by_name.contains_key(signal_name) {
-            let targets = vec![signal_name.clone()];
-            let (target_map, _) = build_target_map(&index2, &targets);
-
-            let mut file = File::open(file2)?;
-            file.seek(SeekFrom::Start(_offset2))?;
-            let reader = BufReader::new(file);
-            let parser = Parser::new(reader);
-            let iter = TimeValueIter::new(parser, target_map, options.time_window.clone());
-
-            let time_values: Vec<(u64, ChangeValue)> = iter
-                .filter_map(|tv| tv.ok())
-                .map(|tv| (tv.time, tv.value))
-                .collect();
-
-            values2.insert(signal_name.clone(), time_values);
-        }
-    }
+    // Build time-value maps in a single scan per file
+    let values1 = collect_signal_values(
+        file1,
+        &index1,
+        _offset1,
+        &signals_to_compare,
+        options.time_window,
+    )?;
+    let values2 = collect_signal_values(
+        file2,
+        &index2,
+        _offset2,
+        &signals_to_compare,
+        options.time_window,
+    )?;
 
     // Compare signals
     let mut all_mismatches = Vec::new();
@@ -833,62 +888,8 @@ pub fn compare_vcd_files(
         let empty: Vec<(u64, ChangeValue)> = Vec::new();
         let times1 = values1.get(signal_name).unwrap_or(&empty);
         let times2 = values2.get(signal_name).unwrap_or(&empty);
-
-        // Collect all time points
-        let mut all_times: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
-        for (time, _) in times1 {
-            all_times.insert(*time);
-        }
-        for (time, _) in times2 {
-            all_times.insert(*time);
-        }
-
-        // Get last value before/at each time point
-        let mut signal_mismatches = 0;
-
-        for time in all_times {
-            // Find most recent value at or before this time
-            let val1_at_time = times1
-                .iter()
-                .rev()
-                .find(|(t, _)| *t <= time)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_else(|| ChangeValue::Text("x".to_string()));
-
-            let val2_at_time = times2
-                .iter()
-                .rev()
-                .find(|(t, _)| *t <= time)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_else(|| ChangeValue::Text("x".to_string()));
-
-            if !values_match(&val1_at_time, &val2_at_time, options.ignore_unknown) {
-                let is_unknown = matches!(
-                    &val1_at_time,
-                    ChangeValue::Text(s) if s == "x" || s == "z"
-                ) || matches!(
-                    &val2_at_time,
-                    ChangeValue::Text(s) if s == "x" || s == "z"
-                );
-
-                all_mismatches.push(SignalMismatch {
-                    signal_name: signal_name.clone(),
-                    time,
-                    value1: val1_at_time.clone(),
-                    value2: val2_at_time.clone(),
-                    is_unknown,
-                });
-
-                signal_mismatches += 1;
-
-                // Apply max_mismatches limit if set
-                if let Some(max) = options.max_mismatches {
-                    if signal_mismatches >= max {
-                        break;
-                    }
-                }
-            }
-        }
+        let signal_mismatches =
+            compare_signal_timeline(signal_name, times1, times2, options, &mut all_mismatches);
 
         if signal_mismatches > 0 {
             signals_with_mismatches += 1;
@@ -910,4 +911,3 @@ pub fn compare_vcd_files(
         passed,
     })
 }
-

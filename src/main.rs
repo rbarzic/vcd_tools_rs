@@ -466,8 +466,16 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
                     .push(mm);
             }
 
-            for signal_name in &result.common_signals {
-                if let Some(mismatches) = mismatches_by_signal.get(signal_name) {
+            if result.passed {
+                println!("All common signals match ({} total).", result.common_signals.len());
+                println!();
+            } else {
+                let mut mismatch_signals: Vec<&String> = mismatches_by_signal.keys().copied().collect();
+                mismatch_signals.sort();
+                for signal_name in mismatch_signals {
+                    let mismatches = mismatches_by_signal
+                        .get(signal_name)
+                        .expect("signal key must exist in mismatch map");
                     println!("Signal: {}", signal_name);
                     for mm in mismatches.iter().take(10) {
                         let val1_str = vcd_tools_rs::format_change_value(&mm.value1);
@@ -484,10 +492,13 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
                         println!("  ... and {} more", mismatches.len() - 10);
                     }
                     println!("  ❌ {} mismatches", mismatches.len());
-                } else {
-                    println!("Signal: {}", signal_name);
-                    println!("  ✅ All values match");
+                    println!();
                 }
+                println!(
+                    "Matched signals: {} / {}",
+                    result.common_signals.len().saturating_sub(result.signals_with_mismatches),
+                    result.common_signals.len()
+                );
                 println!();
             }
 

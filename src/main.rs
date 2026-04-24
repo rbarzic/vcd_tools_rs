@@ -9,7 +9,7 @@ use vcd_tools_rs::{
     TimeValue, TimeWindow, VcdError, build_sizes, build_target_map, find_nth_occurrence,
     format_value_for_signal, list_signals, load_signal_list, parse_target_value, read_signals,
     read_signals_with_offset, read_vcd_metadata,
-    compare_vcd_files, ComparisonOptions,
+    compare_vcd_files, ComparisonOptions, count_toggles,
 };
 
 #[derive(Parser, Debug)]
@@ -45,6 +45,21 @@ enum Commands {
     Extract {
         vcd: PathBuf,
         #[arg(long = "signal", action = ArgAction::Append, help = "Signal name to extract (repeatable)")]
+        signals: Vec<String>,
+        #[arg(
+            long = "signals-file",
+            help = "Text file with one signal name per line"
+        )]
+        signals_file: Option<PathBuf>,
+        #[arg(long, help = "Start time (inclusive)")]
+        start: Option<u64>,
+        #[arg(long, help = "End time (inclusive)")]
+        end: Option<u64>,
+    },
+    /// Count the number of value transitions (toggles) for specific signals
+    Toggle {
+        vcd: PathBuf,
+        #[arg(long = "signal", action = ArgAction::Append, help = "Signal name to count toggles for (repeatable)")]
         signals: Vec<String>,
         #[arg(
             long = "signals-file",
@@ -301,6 +316,33 @@ fn handle_extract(
     Ok(())
 }
 
+fn handle_toggle(
+    vcd: &Path,
+    signals: Vec<String>,
+    signals_file: Option<PathBuf>,
+    window: TimeWindow,
+    pretty: bool,
+) -> Result<()> {
+    let names = collect_signal_names(&signals, signals_file.as_deref())?;
+    let toggle_counts = count_toggles(vcd, &names, window)?;
+
+    let headers = vec!["signal", "toggles"];
+    let rows: Vec<Vec<String>> = names.iter().map(|n| {
+        vec![n.clone(), toggle_counts.get(n).copied().unwrap_or(0).to_string()]
+    }).collect();
+
+    if pretty {
+        print_table(&headers, &rows);
+    } else {
+        println!("{}", headers.join("\t"));
+        for row in &rows {
+            println!("{}", row.join("\t"));
+        }
+    }
+
+    Ok(())
+}
+
 fn handle_find(
     vcd: &Path,
     signal: String,
@@ -350,6 +392,16 @@ fn main() -> Result<()> {
         } => {
             let window = TimeWindow { start, end };
             handle_extract(&vcd, signals, signals_file, window, cli.pretty)
+        }
+        Commands::Toggle {
+            vcd,
+            signals,
+            signals_file,
+            start,
+            end,
+        } => {
+            let window = TimeWindow { start, end };
+            handle_toggle(&vcd, signals, signals_file, window, cli.pretty)
         }
         Commands::Find {
             vcd,

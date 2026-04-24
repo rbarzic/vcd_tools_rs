@@ -621,6 +621,40 @@ pub fn build_sizes(signals: &[Signal]) -> HashMap<String, u32> {
     signals.iter().map(|s| (s.name.clone(), s.size)).collect()
 }
 
+pub fn count_toggles(
+    path: impl AsRef<Path>,
+    targets: &[String],
+    window: TimeWindow,
+) -> Result<HashMap<String, usize>> {
+    let path_ref = path.as_ref();
+    let (signals, index, _timescale, offset) = read_signals_with_offset(path_ref)?;
+    let sizes = build_sizes(&signals);
+    let (target_map, missing) = build_target_map(&index, targets);
+    if !missing.is_empty() {
+        return Err(VcdError::MissingSignals(missing.join(", ")));
+    }
+
+    let mut toggle_counts: HashMap<String, usize> = targets.iter().map(|n| (n.clone(), 0)).collect();
+    let mut last_values: HashMap<String, String> = targets.iter().map(|n| (n.clone(), String::new())).collect();
+
+    let iter = time_value_iter_from_body(path_ref, target_map, window, offset)?;
+    for evt in iter {
+        let evt = evt?;
+        let size = sizes.get(&evt.signal).copied().unwrap_or(1);
+        let formatted = format_value_for_signal(&evt.value, size);
+        if let Some(last) = last_values.get(&evt.signal) {
+            if !last.is_empty() && *last != formatted {
+                if let Some(count) = toggle_counts.get_mut(&evt.signal) {
+                    *count += 1;
+                }
+            }
+        }
+        last_values.insert(evt.signal.clone(), formatted);
+    }
+
+    Ok(toggle_counts)
+}
+
 // ============================================================================
 // VCD Comparison
 // ============================================================================

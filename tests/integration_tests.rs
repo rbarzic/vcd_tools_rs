@@ -549,3 +549,59 @@ fn comparison_options_default() {
     assert!(opts.time_window.start.is_none());
     assert!(opts.time_window.end.is_none());
 }
+
+#[test]
+fn count_toggles_single_signal() {
+    let targets = vec!["chip_wrapper.TRSTN".to_string()];
+    let counts = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None })
+        .expect("count toggles");
+    assert!(counts.contains_key("chip_wrapper.TRSTN"));
+    assert!(counts["chip_wrapper.TRSTN"] > 0);
+}
+
+#[test]
+fn count_toggles_multiple_signals() {
+    let targets = vec![
+        "chip_wrapper.TRSTN".to_string(),
+        "chip_wrapper.U_CHIP.TRSTN".to_string(),
+    ];
+    let counts = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None })
+        .expect("count toggles");
+    assert!(counts.contains_key("chip_wrapper.TRSTN"));
+    assert!(counts.contains_key("chip_wrapper.U_CHIP.TRSTN"));
+    assert!(counts["chip_wrapper.TRSTN"] > 0);
+    assert!(counts["chip_wrapper.U_CHIP.TRSTN"] > 0);
+}
+
+#[test]
+fn count_toggles_empty_window() {
+    let targets = vec!["chip_wrapper.TRSTN".to_string()];
+    let window = vcd_tools_rs::TimeWindow {
+        start: Some(999999999999),
+        end: Some(1000000000000),
+    };
+    let counts = vcd_tools_rs::count_toggles(vcd_path(), &targets, window)
+        .expect("count toggles");
+    assert_eq!(counts["chip_wrapper.TRSTN"], 0);
+}
+
+#[test]
+fn count_toggles_missing_signal() {
+    let targets = vec!["nonexistent_signal".to_string()];
+    let result = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None });
+    assert!(result.is_err());
+}
+
+#[test]
+fn count_toggles_with_time_window() {
+    let targets = vec!["chip_wrapper.TRSTN".to_string()];
+    let counts_full = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None })
+        .expect("count toggles");
+    let counts_limited = vcd_tools_rs::count_toggles(
+        vcd_path(),
+        &targets,
+        vcd_tools_rs::TimeWindow { start: Some(0), end: Some(100) },
+    )
+    .expect("count toggles");
+    assert!(counts_limited["chip_wrapper.TRSTN"] <= counts_full["chip_wrapper.TRSTN"]);
+}

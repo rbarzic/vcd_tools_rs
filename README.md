@@ -75,6 +75,26 @@ Flags:
 
 Signals can be repeated with `--signal` or supplied via `--signals-file` (one per line).
 
+### Signals file example
+
+Create a text file with one signal name per line. Lines starting with `#` are treated as comments and ignored. Inline comments after `#` are also supported:
+
+```text
+# signals.txt
+tb.U_CHIP.counter[7:0]
+tb.U_CHIP.enable
+tb.clk # clock signal
+```
+
+Then pass it to `extract`:
+
+```sh
+vcd_tools_rs extract path/to/file.vcd \
+  --signals-file signals.txt \
+  --start 0 --end 100000 \
+  --pretty
+```
+
 ## vcd2trace (Aldebaran trace)
 
 `vcd2trace` recreates a RISC-V trace from a VCD file
@@ -127,13 +147,13 @@ cargo run --release --bin vcd2trace -- examples/tb.vcd \
 
 ## Tests
 
-(not available from github yet)
-
-The test suite reuses the VCD fixtures from `pyvcd/examples`. Run from this crate root:
+Run the test suite from the crate root:
 
 ```sh
 cargo test
 ```
+
+Tests use `tests/waveform.vcd` as the reference VCD fixture.
 
 ## Notes
 

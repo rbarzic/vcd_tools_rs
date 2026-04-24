@@ -334,8 +334,9 @@ pub fn load_signal_list(path: impl AsRef<Path>) -> Result<Vec<String>> {
     let names = content
         .lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .map(|s| s.to_string())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|s| s.split('#').next().unwrap_or(s).trim().to_string())
+        .filter(|s| !s.is_empty())
         .collect();
     Ok(names)
 }

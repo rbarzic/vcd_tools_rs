@@ -18,17 +18,24 @@ use vcd_tools_rs::{
     version,
     about = "Stream VCD files and query signals (Rust edition)"
 )]
+#[command()]
 struct Cli {
+    #[command(flatten)]
+    global_args: GlobalArgs,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(clap::Args, Debug)]
+struct GlobalArgs {
     #[arg(
         long,
         default_value = "info",
         help = "Logging level (info, debug, warn, error)"
     )]
     log_level: String,
-    #[arg(long, action = ArgAction::SetTrue, help = "Render output using tables")]
+    #[arg(long, action = ArgAction::SetTrue, help = "Render output using tables", global = true)]
     pretty: bool,
-    #[command(subcommand)]
-    command: Commands,
 }
 
 #[derive(Subcommand, Debug)]
@@ -378,11 +385,12 @@ fn handle_find(
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    configure_logging(&cli.log_level);
+    configure_logging(&cli.global_args.log_level);
+    let pretty = cli.global_args.pretty;
 
     match cli.command {
-        Commands::List { vcd, filter } => handle_list(&vcd, filter, cli.pretty),
-        Commands::Meta { vcd } => handle_meta(&vcd, cli.pretty),
+        Commands::List { vcd, filter } => handle_list(&vcd, filter, pretty),
+        Commands::Meta { vcd } => handle_meta(&vcd, pretty),
         Commands::Extract {
             vcd,
             signals,
@@ -391,7 +399,7 @@ fn main() -> Result<()> {
             end,
         } => {
             let window = TimeWindow { start, end };
-            handle_extract(&vcd, signals, signals_file, window, cli.pretty)
+            handle_extract(&vcd, signals, signals_file, window, pretty)
         }
         Commands::Toggle {
             vcd,
@@ -401,7 +409,7 @@ fn main() -> Result<()> {
             end,
         } => {
             let window = TimeWindow { start, end };
-            handle_toggle(&vcd, signals, signals_file, window, cli.pretty)
+            handle_toggle(&vcd, signals, signals_file, window, pretty)
         }
         Commands::Find {
             vcd,
@@ -412,7 +420,7 @@ fn main() -> Result<()> {
             end,
         } => {
             let window = TimeWindow { start, end };
-            handle_find(&vcd, signal, value, occurrence, window, cli.pretty)
+            handle_find(&vcd, signal, value, occurrence, window, pretty)
         }
         Commands::Compare {
             reference,

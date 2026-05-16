@@ -27,6 +27,8 @@ jobs:
   macos:
     name: macOS wheels (${{ matrix.platform.target }})
     runs-on: ${{ matrix.platform.runner }}
+    continue-on-error: true   # stall or failure does not block publish
+    timeout-minutes: 45
     strategy:
       matrix:
         platform:
@@ -75,6 +77,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: [linux, macos, windows, sdist]
+    if: ${{ !failure() }}   # run as long as linux/windows/sdist succeeded; tolerates macOS failure
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

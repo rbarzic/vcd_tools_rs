@@ -25,26 +25,22 @@ jobs:
           path: dist
 
   macos:
-    name: macOS wheels (${{ matrix.platform.target }})
-    runs-on: ${{ matrix.platform.runner }}
-    continue-on-error: true   # stall or failure does not block publish
+    name: macOS wheels (${{ matrix.target }})
+    runs-on: macos-latest   # Apple Silicon; cross-compiles x86_64 via rustup
+    continue-on-error: true
     timeout-minutes: 45
     strategy:
       matrix:
-        platform:
-          - runner: macos-13       # last Intel runner — builds x86_64 natively
-            target: x86_64
-          - runner: macos-latest   # Apple Silicon
-            target: aarch64
+        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.platform.target }}
+          target: ${{ matrix.target }}
           args: --release --out dist --features python
       - uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos-${{ matrix.platform.target }}
+          name: wheels-macos-${{ matrix.target }}
           path: dist
 
   windows:

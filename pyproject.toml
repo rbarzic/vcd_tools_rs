@@ -1,0 +1,41 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "vcd-tools"
+version = "0.1.7"
+requires-python = ">=3.8"
+description = "Fast VCD file analysis tools (list, extract, toggle, find, compare)"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Ronan Barzic", email = "rbarzic@gmail.com" }]
+keywords = ["vcd", "eda", "simulation", "waveform", "hardware"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/rbarzic/vcd_tools_rs"
+Repository = "https://github.com/rbarzic/vcd_tools_rs"
+"Bug Tracker" = "https://github.com/rbarzic/vcd_tools_rs/issues"
+
+[project.scripts]
+vcd_tools_rs = "vcd_tools._cli:main"
+
+[tool.maturin]
+features = ["python"]
+module-name = "vcd_tools"
+python-packages = ["vcd_tools"]

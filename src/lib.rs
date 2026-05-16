@@ -854,6 +854,9 @@ fn compare_signal_timeline(
     signal_mismatches
 }
 
+#[cfg(feature = "python")]
+pub mod python;
+
 pub fn compare_vcd_files(
     file1: &str,
     file2: &str,

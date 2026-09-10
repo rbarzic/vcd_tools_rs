@@ -127,7 +127,26 @@ Every recorded command exited zero. The durable v2 TSV records under `docs/bench
 
 M0 did not repeat every expensive BM-04 through BM-15 combination. Those cases depend on implementations that do not exist yet (reusable open, sparse sidecar, cache, server, and persistent Python iterator), or would add several minutes of duplicate current full scans without changing the initial architectural gate. Before the corresponding optimization gate, run matched repeated baseline/candidate samples for that benchmark ID. Compare and extraction semantics are protected now by small exact fixtures and output checksums; large-file performance samples are added when those paths are modified.
 
-## 6. Interpretation
+## 6. M1 compact-catalog diagnostic (preview, not G2 acceptance)
+
+The reproducible helper below runs compact-only parsing and legacy compatibility materialization in separate optimized test processes, allowing GNU `time` to report actual process peak RSS rather than only an ownership estimate:
+
+```sh
+scripts/measure-catalog-memory.sh "$A"
+```
+
+Four alternating warm measurements per mode on VCD-A after the M1 T01–T03 corrective pass:
+
+| Mode | Elapsed range | Peak RSS range | Signals | Estimated retained catalog bytes |
+|---|---:|---:|---:|---:|
+| Compact only | 0.17–0.20 s | 78,700–78,936 KiB | 193,730 | 36,562,701 (188.73/signal) |
+| Legacy compatibility materialization | 0.71–0.77 s | 393,008–393,088 KiB | 193,730 | Not used; includes owned signals and public clone-heavy maps |
+
+The complete eight samples, command template, commit/dirty state, VCD SHA-256, environment, filesystem, and cache policy are stored in [`artifacts/m1/catalog-memory-A.tsv`](artifacts/m1/catalog-memory-A.tsv). The helper accepts `CATALOG_RUNS` and emits the durable TSV schema directly.
+
+This shows the reusable compact representation can reduce peak process RSS by about 80% when consumers avoid legacy materialization. It does **not** pass G2 by itself: existing path APIs still require compatibility conversion and remain slower than the M0 list baseline. T04–T08 must measure real `OpenedVcd` access, resolve or accept the compatibility latency regression, and complete snapshot/concurrency evidence.
+
+## 7. Interpretation
 
 A header-only persistent process can save about 0.45 seconds per request and avoid repeated allocation churn. For full scans that is approximately:
 
@@ -142,7 +161,7 @@ The server becomes materially valuable when it:
 
 An open file descriptor alone is not expected to improve CPU parsing time.
 
-## 7. Authoritative baseline procedure
+## 8. Authoritative baseline procedure
 
 M0 must run a freshly built checkout:
 
@@ -171,7 +190,7 @@ Record for every run:
 
 Use at least five measured repetitions after one setup run for sub-second operations. Use at least three for multi-second large scans unless cost is prohibitive and documented.
 
-## 8. Exact exploratory command pattern
+## 9. Exact exploratory command pattern
 
 ```sh
 BIN=./target/release/vcd_tools_rs
@@ -208,7 +227,7 @@ timeout 120s /usr/bin/time -f \
 
 Run equivalent commands on VCD-B.
 
-## 9. Required benchmark matrix
+## 10. Required benchmark matrix
 
 | ID | Scenario | Variants | Measurements |
 |---|---|---|---|
@@ -228,7 +247,7 @@ Run equivalent commands on VCD-B.
 | BM-14 | Python iterator | small/large result | time-to-first-row, peak RSS, GIL behavior |
 | BM-15 | Existing CLI regression | list/meta/extract/find/toggle/compare/vcd2trace | wall and output checksum |
 
-## 10. Provisional performance gates
+## 11. Provisional performance gates
 
 These are release gates, not promises. Revisions require measurements and rationale in the implementation plan.
 
@@ -248,7 +267,7 @@ These are release gates, not promises. Revisions require measurements and ration
 | Cancellation | Bounded latency demonstrated during scan, wait, and output backpressure |
 | Python iterator | Memory bounded by configured buffering rather than total result rows |
 
-## 11. Correctness before speed
+## 12. Correctness before speed
 
 Every optimized result is differentially compared to the streaming backend for:
 
@@ -262,7 +281,7 @@ Every optimized result is differentially compared to the streaming backend for:
 
 A faster backend with any unexplained semantic mismatch fails the gate.
 
-## 12. Regression reporting template
+## 13. Regression reporting template
 
 ```text
 Benchmark ID:

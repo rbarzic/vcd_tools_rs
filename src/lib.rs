@@ -1,3 +1,7 @@
+mod catalog;
+mod header;
+pub mod opened;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -5,7 +9,7 @@ use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
 use thiserror::Error;
-use vcd::{Command, IdCode, Parser, ScopeItem, TimescaleUnit, Value, Var, VarType, Vector};
+use vcd::{Command, IdCode, Parser, TimescaleUnit, Value, VarType, Vector};
 
 #[derive(Debug, Error)]
 pub enum VcdError {
@@ -166,152 +170,12 @@ pub fn parse_target_value(raw: &str) -> TargetValue {
     TargetValue::Text(text)
 }
 
-fn resolve_full_name(scope: &[String], var: &Var) -> String {
-    let mut name = if scope.is_empty() {
-        String::new()
-    } else {
-        scope.join(".") + "."
-    };
-    name.push_str(&var.reference);
-    if let Some(idx) = &var.index {
-        name.push_str(&idx.to_string());
-    }
-    name
-}
-
-fn collect_signals(items: &[ScopeItem], scope: &mut Vec<String>, out: &mut Vec<Signal>) {
-    for item in items {
-        match item {
-            ScopeItem::Scope(scope_item) => {
-                scope.push(scope_item.identifier.clone());
-                collect_signals(&scope_item.items, scope, out);
-                scope.pop();
-            }
-            ScopeItem::Var(var) => {
-                out.push(Signal {
-                    name: resolve_full_name(scope, var),
-                    id_code: var.code,
-                    size: var.size,
-                    type_: var.var_type,
-                    scope: scope.clone(),
-                });
-            }
-            ScopeItem::Comment(_) => {}
-            _ => {}
-        }
-    }
-}
-
-fn sanitize_header(header: &[u8]) -> String {
-    fn needs_escape(ident: &str) -> bool {
-        if ident.starts_with('\\') {
-            return false;
-        }
-        if ident.is_empty() {
-            return false;
-        }
-        let starts_ok = ident
-            .chars()
-            .next()
-            .map(|ch| ch.is_ascii_alphabetic() || ch == '_')
-            .unwrap_or(false);
-        if !starts_ok {
-            return true;
-        }
-        let allowed_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$().";
-        ident.chars().any(|ch| !allowed_chars.contains(ch))
-    }
-
-    let text = String::from_utf8_lossy(header);
-    let mut sanitized = String::with_capacity(header.len());
-
-    for line in text.split_inclusive(['\n', '\r']) {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("$scope ") {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.len() >= 4 && parts[0] == "$scope" {
-                let ident = parts[2];
-                let fixed = if needs_escape(ident) {
-                    if ident.starts_with('\\') {
-                        ident.to_string()
-                    } else {
-                        format!("\\{}", ident)
-                    }
-                } else {
-                    ident.to_string()
-                };
-                let newline = if line.ends_with('\n') { "\n" } else { "" };
-                let prefix_len = line.len() - trimmed.len();
-                let prefix = &line[..prefix_len];
-                let rebuilt = format!("{prefix}$scope {} {} $end{newline}", parts[1], fixed);
-                sanitized.push_str(&rebuilt);
-                continue;
-            }
-        }
-        sanitized.push_str(line);
-    }
-
-    sanitized
-}
-
-fn read_header_bytes(path: &Path) -> Result<(Vec<u8>, u64)> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut header_bytes: Vec<u8> = Vec::new();
-    let mut line_buf: Vec<u8> = Vec::new();
-    let mut found = false;
-
-    loop {
-        line_buf.clear();
-        let bytes = reader.read_until(b'\n', &mut line_buf)?;
-        if bytes == 0 {
-            break;
-        }
-        header_bytes.extend_from_slice(&line_buf);
-        if line_buf
-            .windows(b"$enddefinitions".len())
-            .any(|w| w == b"$enddefinitions")
-        {
-            found = true;
-            break;
-        }
-    }
-
-    if !found {
-        return Err(VcdError::MissingEndDefinitions);
-    }
-
-    let body_offset = reader.stream_position()?;
-    Ok((header_bytes, body_offset))
-}
-
-fn parse_header_from_bytes(bytes: &[u8]) -> Result<(Vec<Signal>, Option<Timescale>)> {
-    let sanitized = sanitize_header(bytes);
-    let cursor = io::Cursor::new(sanitized.as_bytes());
-    let mut parser = Parser::new(cursor);
-    let header = parser.parse_header().map_err(|e| {
-        let msg = format!("{}", e);
-        VcdError::Parse(msg)
-    })?;
-
-    let mut signals = Vec::new();
-    let mut scope = Vec::new();
-    collect_signals(&header.items, &mut scope, &mut signals);
-    let timescale = header.timescale.map(|(mag, unit)| Timescale {
-        magnitude: mag,
-        unit,
-    });
-    Ok((signals, timescale))
-}
-
 pub fn read_signals_with_offset(
     path: impl AsRef<Path>,
 ) -> Result<(Vec<Signal>, SignalIndex, Option<Timescale>, u64)> {
-    let path = path.as_ref();
-    let (header_bytes, offset) = read_header_bytes(path)?;
-    let (signals, timescale) = parse_header_from_bytes(&header_bytes)?;
-    let index = SignalIndex::build(&signals)?;
-    Ok((signals, index, timescale, offset))
+    let parsed = header::read_compact_header(path)?;
+    let (signals, index) = parsed.catalog.into_compatibility_parts()?;
+    Ok((signals, index, parsed.timescale, parsed.body_offset))
 }
 
 pub fn read_signals(

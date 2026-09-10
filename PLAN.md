@@ -97,9 +97,9 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Begin RQ-M1-T01 and T02: file-generation identity/options and compact signal catalog.
-2. Preserve the accepted M0 characterization suite as the differential compatibility boundary.
-3. Use the documented serial test command until M1 reduces catalog memory or test execution is explicitly serialized in CI.
+1. Implement RQ-M1-T04: `OpenedVcd::open`, compact-catalog accessors, and cheap clone semantics.
+2. Then implement T05/T06: independent generation-validated readers and borrowed `SignalRef`/compatibility views.
+3. Resolve the measured compatibility-list latency regression before G2; retain the accepted M0 suite as the semantic oracle.
 4. Keep metadata lazy and do not begin socket, sidecar, or cache implementation before the reusable core passes G2/G3.
 
 ## Progress update template

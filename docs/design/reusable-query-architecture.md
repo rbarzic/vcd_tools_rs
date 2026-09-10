@@ -106,10 +106,17 @@ struct OpenedVcdInner {
     cache: SelectiveTimelineCache,
 }
 
+#[non_exhaustive]
 pub struct OpenOptions {
-    pub fingerprint_policy: FingerprintPolicy,
-    pub sidecar_policy: SidecarPolicy,
-    pub cache_options: CacheOptions,
+    fingerprint_policy: FingerprintPolicy,
+    // Sidecar/cache controls are added through backward-compatible builders
+    // only after their independent gates pass.
+}
+
+impl OpenOptions {
+    pub fn new() -> Self;
+    pub fn with_fingerprint_policy(self, policy: FingerprintPolicy) -> Self;
+    pub fn fingerprint_policy(&self) -> FingerprintPolicy;
 }
 ```
 
@@ -279,15 +286,17 @@ Only one metadata/index builder runs per generation. Waiters can cancel without 
 
 ## 10. File identity and generation semantics
 
-`FileIdentity` includes, where available:
+`FileIdentity` contains, where available:
 
 - file length;
 - nanosecond-resolution modification time;
-- Unix device and inode or platform file identity;
+- Unix device and inode, or Windows volume serial number and file index;
 - parsed body offset;
-- hash of the header;
-- bounded hashes/samples from the start and end of the snapshotted content;
-- optional strict full-file hash.
+- BLAKE3 of the complete header;
+- a default bounded fingerprint of the first and last 64 KiB;
+- optional strict full-file BLAKE3, which is explicitly opt-in because it scans the body.
+
+Identity fields are opaque/read-only and constructors remain crate-private. Header bytes, body offset, metadata, bounded samples, and optional strict hash must all derive from the same opened handle.
 
 Rules:
 

@@ -1,0 +1,26 @@
+record	value
+schema	vcd_catalog_memory_v1
+git_commit	ba8cbd4b2d5a3626ad640d990c8806a0128faf31
+git_dirty	true
+rustc	rustc 1.93.1 (01f6ddf75 2026-02-11);binary: rustc;commit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf;commit-date: 2026-02-11;host: x86_64-unknown-linux-gnu;release: 1.93.1;LLVM version: 21.1.8;
+uname	Linux onio-ws13 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+cpu	12th Gen Intel(R) Core(TM) i9-12900K
+memory_kib	65577852
+filesystem	ext4   /dev/nvme0n1p2 /
+vcd_path	/home/roba/work/gitlab/icdesign/chips/polaris-hw/sim/ctests/cp1_cp2_payload_006/tb.vcd
+vcd_size_bytes	4589561612
+vcd_mtime	2026-08-28 09:46:46.061641555 +0200
+vcd_sha256	8b5a3791ad8d4232e637fd16edba9618cd0370eb66d3d7e1d780f82531c8f4ac
+cache_policy	uncontrolled; page cache not dropped; compact and compatibility alternate per run
+runs_per_mode	4
+test_binary	/home/roba/work/github/vcd_tools_rs/target/release/deps/vcd_tools_rs-d464d9e34f775db4
+command_template	VCD_CATALOG_PROBE=<vcd> /usr/bin/time <test-binary> --exact catalog::tests::probe_<mode>_peak_rss --ignored --nocapture
+sample	mode	run	elapsed_s	user_s	system_s	max_rss_kib	probe_summary
+sample	compact	1	0.20	0.17	0.02	78904	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	compatibility	1	0.77	0.63	0.13	393008	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850
+sample	compact	2	0.18	0.15	0.02	78700	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	compatibility	2	0.77	0.64	0.12	393036	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850
+sample	compact	3	0.18	0.15	0.02	78864	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	compatibility	3	0.73	0.60	0.12	393032	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850
+sample	compact	4	0.17	0.14	0.02	78936	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	compatibility	4	0.71	0.57	0.13	393088	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850

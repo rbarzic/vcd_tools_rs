@@ -254,10 +254,10 @@ Exit: Gate G2
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M1-T01 | READY | G1 | Define `FileIdentity`, `GenerationId`, `OpenOptions` |
-| RQ-M1-T02 | READY | G1 | Implement compact scope/name/signal catalog |
-| RQ-M1-T03 | BLOCKED | T02 | Refactor header parsing to populate catalog directly |
-| RQ-M1-T04 | BLOCKED | T01,T03 | Implement `OpenedVcd::open` and accessors |
+| RQ-M1-T01 | DONE | G1 | Define `FileIdentity`, `GenerationId`, `OpenOptions` |
+| RQ-M1-T02 | DONE | G1 | Implement compact scope/name/signal catalog |
+| RQ-M1-T03 | DONE | T02 | Consume the parsed vcd 0.7 header tree into the compact catalog |
+| RQ-M1-T04 | READY | T01,T03 | Implement `OpenedVcd::open` and accessors |
 | RQ-M1-T05 | BLOCKED | T04 | Implement independent generation-validated readers |
 | RQ-M1-T06 | BLOCKED | T04 | Add borrowed `SignalRef` and owned compatibility conversion |
 | RQ-M1-T07 | BLOCKED | T04,T05 | Add lazy metadata single-flight state |
@@ -294,16 +294,18 @@ Acceptance:
 - duplicate declaration behavior unchanged;
 - estimated owned bytes exposed in tests/diagnostics.
 
-## RQ-M1-T03 — Header parser refactor
+## RQ-M1-T03 — Consuming header-to-catalog conversion
 
 Expected files: `src/header.rs`, reduced `src/lib.rs`.
 
 Acceptance:
 
 - sanitizer behavior remains characterized;
-- parser produces body offset, timescale, and compact catalog in one header pass;
-- no body scan;
+- vcd 0.7 parses the header once, after which its materialized `Header`/`ScopeItem` tree is moved into and consumed by compact catalog construction;
+- parser produces exact body offset and timescale without a body scan;
 - fixtures and large-header integration tests pass.
+
+Implementation seam: vcd 0.7 exposes `Parser::parse_header` returning a complete `Header`; it does not expose declaration callbacks for true parser-direct catalog construction. Replacing that parser is outside T03. The accepted implementation must consume the tree and release processed nodes rather than borrowing and retaining the full tree while duplicating it.
 
 ## RQ-M1-T04 — `OpenedVcd`
 
@@ -359,6 +361,41 @@ Acceptance:
 - cancellation/panic/failure cannot strand `Building`;
 - waiters are awakened deterministically;
 - exact old metadata semantics preserved.
+
+## M1 first-slice evidence (RQ-M1-T01 through T03)
+
+Current status: **ACCEPTED**.
+
+Reviewer decision:
+
+- RQ-M1-T01, T02, and T03 accepted;
+- same-handle identity, bounded/strict fingerprints, extensible options, public error compatibility, consuming conversion, and durable RSS evidence verified;
+- CR-001 accepted as the formal vcd 0.7 implementation-seam change;
+- G2 remains open for T04–T08.
+
+Implementation evidence:
+
+- `src/opened/identity.rs` adds opaque, handle-derived `FileIdentity`, target-gated Unix device/inode and Windows volume/file-index foundations, process-local `GenerationId`, and BLAKE3 header/content fingerprints. Default identity work hashes the complete header plus bounded 64 KiB beginning/end samples; strict full-content hashing is explicit and opt-in.
+- `OpenOptions` has private fields, is `#[non_exhaustive]`, and exposes constructor/builder/accessor methods so later sidecar/cache options can be additive. `FingerprintPolicy` is also non-exhaustive.
+- `FileIdentity` construction is crate-private. `src/header.rs` provides the provenance-safe seam that reads the header, computes body offset, samples/hashes, and restores cursor position using the same opened handle.
+- `src/catalog.rs` stores declaration-order `SignalMeta` records, one shared full-name allocation, numeric `SignalKey` alias lists, and a parent-linked scope arena. Checked `u32` capacity failure maps through the existing `VcdError::Parse` boundary; no public error variant was added.
+- vcd 0.7 necessarily materializes a `Header` tree. T03 now moves its items out, drops remaining header metadata, and consumes `ScopeItem`/`Var` nodes while constructing the compact catalog; it does not claim unavailable parser-direct declaration callbacks.
+- `read_signals*` preserves public `Signal`/`SignalIndex` return types through a consuming compatibility conversion. Compact lookup maps are released before public clone-heavy maps are built to limit overlap.
+- Sixteen focused non-ignored unit tests cover the compatible capacity-error boundary, `Send + Sync` foundations, extensible options, bounded/strict fingerprints, same-handle identity, offset validation, tail-change detection, generation uniqueness, compact names/aliases/nested scopes, consuming compatibility conversion, sanitizer behavior, exact body offset, and memory-estimate accounting.
+- Complete serial suite passes: 108 passed, 0 failed, 2 ignored release diagnostics (16 new unit + 92 accepted M0 tests).
+- Focused release-mode library and compatibility tests pass; measured diagnostic results are listed below.
+- `cargo check --all-targets` passes without warnings. New modules pass `rustfmt --check`; shell syntax and `git diff --check` pass.
+
+Memory/performance observation:
+
+- `scripts/measure-catalog-memory.sh` runs isolated release-test processes for compact-only and compatibility materialization, accepts a configurable sample count, and emits commit, input SHA-256, environment, cache policy, command, GNU time, peak RSS, and probe counts.
+- Four alternating warm samples per mode on VCD-A are durably stored in `docs/benchmarks/artifacts/m1/catalog-memory-A.tsv`.
+- Compact-only parsing measured 78,700–78,936 KiB peak RSS and 0.17–0.20 s elapsed. The compact catalog retained 193,730 signals with an estimated 36,562,701 owned bytes (188.73 bytes/signal).
+- Compatibility materialization measured 393,008–393,088 KiB peak RSS and 0.71–0.77 s elapsed. This is actual process peak RSS, not only estimated ownership.
+- The compatibility `list` path remains slower than the M0 0.52–0.55 s baseline because it builds the compact catalog and then materializes clone-heavy public maps. This cold compatibility regression remains a known blocker for G2/T08, not an accepted final result.
+- Compact-only actual peak RSS is about 80% below compatibility materialization on VCD-A, demonstrating the reusable representation's benefit once T04 consumers avoid compatibility conversion.
+
+Scope remains limited to T01–T03: no `OpenedVcd`, metadata scan, independent reader, sidecar, cache, or server behavior was added.
 
 ## Gate G2 — Core representation and snapshot
 
@@ -951,7 +988,23 @@ Follow [`../benchmarks/reusable-query-baseline.md`](../benchmarks/reusable-query
 
 # 6. Change-control records
 
-When a gate or target changes, append:
+## CR-001 — Replace parser-direct catalog population with consuming conversion
+
+| Field | Record |
+|---|---|
+| Change ID | `CR-001` |
+| Owner/approval | Supervising implementation authority; approved after M1 reviewer finding |
+| Affected tasks | `RQ-M1-T03`, G2 memory evidence |
+| Old requirement | Populate the compact catalog directly during header parsing, without a complete intermediate header tree |
+| Technical constraint | `vcd` 0.7 exposes `Parser::parse_header()` returning a fully materialized `Header`; it provides no declaration callback/streaming header-builder seam |
+| Approved replacement | Parse the required `Header`, move `Header.items` out, drop remaining header metadata, and consume owned `ScopeItem`, nested scope, and `Var` nodes while constructing the compact catalog |
+| Evidence | Consuming implementation in `src/header.rs`/`src/catalog.rs`; compatibility tests; durable isolated RSS measurements in `docs/benchmarks/artifacts/m1/catalog-memory-A.tsv` |
+| Peak-memory implication | The complete parser header necessarily exists initially, but processed tree nodes are not retained through a borrowed second representation; actual compact-only peak RSS, not an ownership estimate alone, remains the G2 evidence |
+| Compatibility impact | None; public `Signal`, `SignalIndex`, and path APIs retain their accepted M0 behavior |
+| Rollback | Revert the compact parser/catalog modules and restore the M0 header implementation |
+| Status | `APPROVED` |
+
+Future changes must append another record using this template:
 
 ```text
 Change ID: CR-xxx

@@ -30,7 +30,7 @@ Recommended v1 product boundary:
 
 | Document | Purpose | Status |
 |---|---|---|
-| [`docs/plans/reusable-query-implementation-plan.md`](docs/plans/reusable-query-implementation-plan.md) | Work breakdown, dependencies, task status, acceptance criteria, validation, risks, and gates | APPROVED; M2 IN PROGRESS |
+| [`docs/plans/reusable-query-implementation-plan.md`](docs/plans/reusable-query-implementation-plan.md) | Work breakdown, dependencies, task status, acceptance criteria, validation, risks, and gates | APPROVED; M3 READY |
 | [`docs/design/current-compatibility-contract.md`](docs/design/current-compatibility-contract.md) | Characterized Rust, native CLI, Python, trace, packaging, errors, and semantic compatibility boundary | ACCEPTED AT G1 |
 | [`docs/design/reusable-query-architecture.md`](docs/design/reusable-query-architecture.md) | Core ownership, data model, semantics, query backends, invalidation, and compatibility | DRAFT |
 | [`docs/design/sidecar-format-v1.md`](docs/design/sidecar-format-v1.md) | Sparse timestamp/offset index format and lifecycle | DRAFT; blocked on offset spike |
@@ -57,8 +57,8 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 |---|---|---|---|---|
 | M0 | Decisions, semantic characterization, fresh baselines | DONE | G0 passed | G1 passed |
 | M1 | Compact catalog and `OpenedVcd` | DONE | G1 passed | G2 passed |
-| M2 | Transport-neutral query engine and compatibility wrappers | IN_PROGRESS | G2 passed | G3 |
-| M3 | Technical spikes: offsets, snapshot readers, scheduler, serialization | BLOCKED | G3 | G4 |
+| M2 | Transport-neutral query engine and compatibility wrappers | DONE | G2 passed | G3 passed |
+| M3 | Technical spikes: offsets, snapshot readers, scheduler, serialization | IN_PROGRESS | G3 passed | G4 |
 | M4 | Experimental bounded Unix-socket server using streaming backend | BLOCKED | G4 | G5 |
 | M5 | Sparse persistent sidecar | BLOCKED | Offset spike approved | G6 |
 | M6 | Selective/hot-signal timeline cache | BLOCKED | M2 and workload evidence | G7 |
@@ -71,7 +71,7 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 | G0 | Approve product boundary and non-goals | PASSED | Decisions D-001 through D-010 approved by project owner |
 | G1 | Lock current semantics and baseline | PASSED | Reviewer accepted 92 serial Rust tests, 3 Python tests, compatibility contract, and durable `0.1.7` baselines |
 | G2 | Accept compact catalog and snapshot model | PASSED | Reviewer accepted T08, 79.9% RSS reduction, faster native list, concurrency/snapshot tests, and CR-002 all-target checks |
-| G3 | Accept query-engine refactor | BLOCKED | Old/new differential tests and CLI/Python compatibility green |
+| G3 | Accept query-engine refactor | PASSED | Reviewer accepted 177 debug/release Rust tests, compiled Python compatibility, five target checks, and T09 deferral |
 | G4 | Select feasible server and index mechanisms | BLOCKED | All required technical spikes reported |
 | G5 | Ship experimental streaming server | BLOCKED | Protocol, limits, cancellation, security, soak, portability pass |
 | G6 | Enable sparse sidecar as opt-in | BLOCKED | Resume correctness, corruption/invalidation, speed and size targets pass |
@@ -97,10 +97,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Complete final M2 batch: T08 Python module compatibility, T09 `vcd2trace` disposition, and T10 G3 evidence.
-2. Keep the Python module-level API compatible; persistent Python `Vcd` remains M7 unless an additive minimal class is explicitly approved.
-3. Run one final M2 compatibility matrix and consolidated G3 review.
-4. Keep socket, sidecar, and cache implementation blocked until G3 passes.
+1. Select and run the bounded M3 technical spikes: parser-safe offsets, compact event representation, and server scheduling/protocol.
+2. Keep the spikes independent and time-boxed; they produce decisions/prototypes, not production server/index code.
+3. Preserve T09 deferral until a ten-signal byte-golden trace fixture exists.
+4. Do not begin the experimental server or sidecar implementation until G4 selects the mechanisms.
 
 ## Progress update template
 

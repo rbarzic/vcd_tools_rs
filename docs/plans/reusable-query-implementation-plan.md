@@ -504,9 +504,9 @@ Pass when:
 
 # M2 — Transport-neutral query engine and compatibility wrappers
 
-Milestone status: `IN_PROGRESS`
+Milestone status: `DONE`
 Entry: Gate G2 passed
-Exit: Gate G3
+Exit: Gate G3 passed
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
@@ -517,9 +517,9 @@ Exit: Gate G3
 | RQ-M2-T05 | DONE | T03 | Timeline-provider interface and comparison adaptation |
 | RQ-M2-T06 | DONE | T03-T05 | Path-based compatibility wrappers |
 | RQ-M2-T07 | DONE | T06 | CLI uses one `OpenedVcd` per input |
-| RQ-M2-T08 | READY | T06 | Python module functions use temporary `OpenedVcd` |
-| RQ-M2-T09 | READY | T06 | Evaluate `vcd2trace` migration |
-| RQ-M2-T10 | BLOCKED | T01-T09 | Differential backend/compatibility evidence |
+| RQ-M2-T08 | DONE | T06 | Python module functions use temporary `OpenedVcd` |
+| RQ-M2-T09 | DEFERRED | T06 | Evaluate `vcd2trace` migration |
+| RQ-M2-T10 | DONE | T01-T09 | Differential backend/compatibility evidence |
 
 ## RQ-M2-T01 — Query context
 
@@ -636,15 +636,38 @@ Acceptance: signatures/return types/errors remain compatible and old tests pass 
 
 ## RQ-M2-T08 — Python module compatibility
 
+Status: **DONE**. Compiled ABI3 extension compatibility passed for all six module functions; persistent Python `Vcd` remains M7.
+
+Status: **IN REVIEW**.
+
+The existing PyO3 module functions call path compatibility wrappers that now construct temporary `OpenedVcd` instances. `scripts/test-python-extension.sh` builds the current ABI3 extension with maturin in an isolated environment. Five compiled-extension tests lock exports/signatures, all six function result shapes, values/order, and `RuntimeError` mapping. The persistent Python class and iterator remain M7.
+
 Route old functions through temporary objects. Persistent class is M7.
 
 Acceptance: existing Python signatures, keys, values, and exceptions pass tests.
 
 ## RQ-M2-T09 — `vcd2trace`
 
+Status: **DEFERRED**. Reviewer accepted deferral because the binary already performs one header parse and one forward scan; migration requires the planned ten-signal byte-golden trace fixture.
+
+Status: **DEFERRED**.
+
+`vcd2trace` already performs one header parse and one forward body scan, so it does not benefit materially from repeated-query reuse. Its specialized rising-edge and state-before-update behavior lacks the required ten-signal byte-golden fixture. Release build, `--help`, and expected missing-signal smoke behavior pass. Reconsider migration only after the golden fixture exists.
+
 Migrate only if it reduces duplication without delaying gates. Output must be byte-identical. Otherwise mark `DEFERRED` with rationale.
 
 ## Gate G3 — Query engine compatibility
+
+Current status: **PASSED**.
+
+Reviewer decision:
+
+- RQ-M2-T08 and T10: `DONE`;
+- RQ-M2-T09: `DEFERRED` with rationale accepted;
+- Gate G3: `PASSED`;
+- Milestone M2: `DONE`;
+- M3 may begin;
+- comparison materialization, native release packaging, Python wheels, and the trace golden fixture remain explicit later obligations.
 
 ### T03–T07 consolidated batch evidence
 
@@ -675,16 +698,17 @@ Pass when:
 
 # M3 — Required technical spikes and design freeze
 
-Milestone status: `BLOCKED` on G3
+Milestone status: `IN_PROGRESS`
+Entry: Gate G3 passed
 Exit: Gate G4
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M3-T01 | BLOCKED | G3 | Confirm independent snapshot-reader behavior across targets |
-| RQ-M3-T02 | BLOCKED | G3 | Prove parser-safe timestamp offsets/resume |
-| RQ-M3-T03 | BLOCKED | G3 | Prototype compact event bytes/order fidelity |
-| RQ-M3-T04 | BLOCKED | G3 | Prototype bounded server scheduling/cancellation/backpressure |
-| RQ-M3-T05 | BLOCKED | G3 | Freeze protocol value/numeric schemas and limits |
+| RQ-M3-T01 | READY | G3 | Confirm independent snapshot-reader behavior across targets |
+| RQ-M3-T02 | READY | G3 | Prove parser-safe timestamp offsets/resume |
+| RQ-M3-T03 | READY | G3 | Prototype compact event bytes/order fidelity |
+| RQ-M3-T04 | READY | G3 | Prototype bounded server scheduling/cancellation/backpressure |
+| RQ-M3-T05 | READY | G3 | Freeze protocol value/numeric schemas and limits |
 | RQ-M3-T06 | BLOCKED | T01-T05 | Gate report selecting mechanisms or deferring features |
 
 ## RQ-M3-T01 — Snapshot-reader spike

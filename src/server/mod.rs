@@ -1,6 +1,8 @@
-//! Transport-neutral server protocol foundations.
-//!
-//! Unix listener and scheduling code is added separately. This module stays
-//! available on every supported target so protocol fixtures are portable.
+//! Server protocol and Unix runtime foundations.
 
 pub mod protocol;
+
+#[cfg(unix)]
+pub mod listener;
+#[cfg(unix)]
+pub mod runtime;

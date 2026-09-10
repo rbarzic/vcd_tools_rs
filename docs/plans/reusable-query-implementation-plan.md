@@ -814,11 +814,11 @@ Exit: Gate G5
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
 | RQ-M4-T01 | DONE | G4 | Protocol types/decoder/encoder and golden tests |
-| RQ-M4-T02 | READY | T01 | Safe listener lifecycle and permissions |
-| RQ-M4-T03 | READY | T01 | Bounded scheduler and request registry |
-| RQ-M4-T04 | BLOCKED | T02,T03 | Connection reader/writer and backpressure |
-| RQ-M4-T05 | BLOCKED | T03,T04 | Cancellation/deadline/disconnect handling |
-| RQ-M4-T06 | BLOCKED | T01,T05 | `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles` |
+| RQ-M4-T02 | DONE | T01 | Safe listener lifecycle and permissions |
+| RQ-M4-T03 | DONE | T01 | Bounded scheduler and request registry |
+| RQ-M4-T04 | DONE | T02,T03 | Connection reader/writer and backpressure |
+| RQ-M4-T05 | DONE | T03,T04 | Cancellation/deadline/disconnect handling |
+| RQ-M4-T06 | READY | T01,T05 | `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles` |
 | RQ-M4-T07 | BLOCKED | T06 | Generation invalidation/reopen behavior |
 | RQ-M4-T08 | BLOCKED | T02-T07 | CLI/binary integration and configuration validation |
 | RQ-M4-T09 | BLOCKED | T08 | Race-free test client and end-to-end suite |
@@ -898,6 +898,22 @@ Acceptance:
 - disconnect cancels owned requests;
 - target terminal state unambiguous;
 - cancellation latency benchmarked.
+
+## M4 T02–T05 consolidated runtime evidence
+
+Status: **ACCEPTED**.
+
+- Unix-only `listener` and `runtime` modules are target-gated; protocol remains portable.
+- Listener requires an absolute path under an existing current-user-owned, owner-private (0700-style) directory; distinguishes live/stale sockets only for conservative connect outcomes; refuses non-sockets; rechecks stale inode; installs inode-aware cleanup at bind; sets `0600`; removes only its created inode.
+- Runtime uses finite connection permits, fixed workers, bounded global/per-connection channels, active-ID registry/counters, immediate queue rejection, one cancellation-aware generation scan permit, panic isolation, and RAII cleanup.
+- Connections use the accepted accumulator/decoder/encoder directly, one serialized writer, write timeouts, bounded output, partial/multiple-frame support, and per-request ordering/interleaving.
+- Cancellation is covered while queued, waiting for scan permit, working, blocked on output, and disconnected. Service code must use `with_expensive_scan` to release the permit before output.
+- Reviewer-blocker corrections unify one connection shutdown flag, guarantee socket shutdown/permit cleanup, enforce exact per-request response lifecycle/sequence with required terminal-or-deliberate-close behavior, require owner-private listener creation, bound encoded frames at 256 KiB by default, reject timeout raises/overflow, and deterministically coordinate output saturation.
+- Final blocker fixes arm cleanup immediately at bind through a unique owner-private pathname before fallible metadata work, upgrade to inode-aware cleanup, and serialize directly through a capped writer before appending JSONL newline; deterministic regressions cover injected post-bind failure, exact cap/N+1, and an 8 MiB payload without oversized encoded allocation.
+- Final publication uses atomic no-replace hard-linking from the guarded private temporary socket; a deterministic two-binder race proves the loser preserves the live winner and removes its own temporary path.
+- Focused `protocol_v1` and `server_runtime` suites pass 29 tests with zero failures; host and Windows `cargo check --all-targets`, changed-file formatting, and diff checks pass.
+- Dispatcher is a test seam only; production methods remain T06.
+- Evidence: `docs/benchmarks/artifacts/m4/runtime-validation.md`.
 
 ## RQ-M4-T06 — Service methods
 

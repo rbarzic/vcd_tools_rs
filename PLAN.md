@@ -97,10 +97,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Batch M4 T02–T05: safe Unix listener, bounded scheduler/registry, connection backpressure, and cancellation/disconnect handling.
-2. Use the accepted protocol module directly; do not duplicate frame or request validation in listener code.
-3. Keep sidecar production work in M5/G6 and selective cache production work in M6/G7.
-4. Preserve native-only server distribution and do not advertise compare/cache/shutdown methods in protocol v1.
+1. Implement the MVP service batch: T06 methods, T07 generation behavior, T08 `serve` CLI integration, and T09 end-to-end client tests.
+2. Use the accepted bounded runtime and protocol directly; no sidecar/cache/compare/shutdown methods in v1.
+3. Run focused end-to-end tests and one final M4 review; defer long soak/release hardening to T10/G5.
+4. Preserve native-only server distribution and document that the pip console does not expose `serve`.
 
 ## Progress update template
 

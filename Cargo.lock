@@ -713,6 +713,7 @@ dependencies = [
  "blake3",
  "clap",
  "env_logger",
+ "libc",
  "log",
  "pyo3",
  "serde",

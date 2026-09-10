@@ -61,7 +61,6 @@ pub(crate) struct SignalMeta {
 /// Names are allocated once and shared with `by_name`; aliases contain numeric
 /// keys rather than cloned `Signal` values; scopes are stored once as an arena.
 #[derive(Debug)]
-#[allow(dead_code)] // Lookup tables become active when `OpenedVcd` is introduced in RQ-M1-T04.
 pub(crate) struct SignalCatalog {
     signals: Box<[SignalMeta]>,
     by_name: HashMap<Arc<str>, SignalKey>,
@@ -70,7 +69,6 @@ pub(crate) struct SignalCatalog {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Exposed through `OpenedVcd` diagnostics in the next M1 slice.
 pub(crate) struct CatalogMemoryEstimate {
     pub(crate) total_bytes: usize,
     pub(crate) signal_bytes: usize,
@@ -186,7 +184,6 @@ impl CatalogBuilder {
     }
 }
 
-#[allow(dead_code)] // Several lookup methods are foundations for `OpenedVcd` in RQ-M1-T04.
 impl SignalCatalog {
     pub(crate) fn from_scope_items(items: Vec<ScopeItem>) -> Result<Self> {
         let mut builder = CatalogBuilder::new();
@@ -216,6 +213,23 @@ impl SignalCatalog {
 
     pub(crate) fn names(&self) -> impl ExactSizeIterator<Item = &str> {
         self.signals.iter().map(|signal| signal.full_name.as_ref())
+    }
+
+    pub(crate) fn signal_keys(&self) -> impl ExactSizeIterator<Item = SignalKey> + '_ {
+        (0..self.signals.len()).map(|index| SignalKey(index as u32))
+    }
+
+    pub(crate) fn scope_component_refs(&self, key: SignalKey) -> Vec<&str> {
+        let mut keys = Vec::new();
+        let mut current = self.signal(key).scope;
+        while let Some(scope_key) = current {
+            keys.push(scope_key);
+            current = self.scopes[scope_key.index()].parent;
+        }
+        keys.reverse();
+        keys.into_iter()
+            .map(|scope_key| self.scopes[scope_key.index()].component.as_ref())
+            .collect()
     }
 
     fn scope_components(&self, scope: Option<ScopeKey>) -> Vec<String> {

@@ -142,7 +142,9 @@ The initial safe strategy is:
 5. parse using that handle;
 6. validate source identity again at query completion according to policy.
 
-Opening then inspecting the handle avoids a path replacement race: if replacement happened before open, identity differs; if it happens after open, the query retains the already opened object. A later optimization may use positioned-I/O adapters, but it requires cross-platform tests.
+The configured path is converted to an absolute path at open time so later working-directory changes cannot redirect it, but its final symlink is deliberately not canonicalized. Every admission and completion reopen uses that absolute configured path; a retargeted symlink therefore fails generation validation. A canonical target may be retained for diagnostics only and must never become the reopen path.
+
+Opening then inspecting the handle avoids a path replacement race: if replacement happened before open, identity differs; if it happens after open, the query retains the already opened object. Completion validates both the admitted handle and a fresh configured-path reopen. A later optimization may use positioned-I/O adapters, but it requires cross-platform tests.
 
 ## 6. Compact signal catalog
 
@@ -296,7 +298,7 @@ Only one metadata/index builder runs per generation. Waiters can cancel without 
 - a default bounded fingerprint of the first and last 64 KiB;
 - optional strict full-file BLAKE3, which is explicitly opt-in because it scans the body.
 
-Identity fields are opaque/read-only and constructors remain crate-private. Header bytes, body offset, metadata, bounded samples, and optional strict hash must all derive from the same opened handle.
+Identity fields are opaque/read-only and constructors remain crate-private. Header bytes, body offset, metadata, bounded samples, and optional strict hash must all derive from the same opened handle. Every later admission and completion validation recomputes the complete raw byte region `0..body_offset` and compares it with the stored header fingerprint under both bounded and strict policies; beginning/end samples are not a substitute for complete-header validation.
 
 Rules:
 

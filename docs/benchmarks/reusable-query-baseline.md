@@ -135,16 +135,19 @@ The reproducible helper below runs compact-only parsing and legacy compatibility
 scripts/measure-catalog-memory.sh "$A"
 ```
 
-Four alternating warm measurements per mode on VCD-A after the M1 T01–T03 corrective pass:
+**Preview only:** these four alternating warm measurements per mode were captured from a dirty implementation worktree after M1 T04–T06. They are diagnostic evidence, not final G2 acceptance data. RQ-M1-T08 must capture at least five samples per mode from a clean committed tree with the input hash verified before making the gate decision.
 
 | Mode | Elapsed range | Peak RSS range | Signals | Estimated retained catalog bytes |
 |---|---:|---:|---:|---:|
-| Compact only | 0.17–0.20 s | 78,700–78,936 KiB | 193,730 | 36,562,701 (188.73/signal) |
-| Legacy compatibility materialization | 0.71–0.77 s | 393,008–393,088 KiB | 193,730 | Not used; includes owned signals and public clone-heavy maps |
+| Compact parser only | 0.15–0.17 s | 78,684–78,748 KiB | 193,730 | 36,562,701 (188.73/signal) |
+| `OpenedVcd` plus borrowed list/lookup | 0.17–0.18 s | 78,644–79,080 KiB | 193,730 | 36,562,701 (188.73/signal) |
+| Legacy compatibility materialization | 0.67–0.68 s | 392,864–393,108 KiB | 193,730 | Not used; includes owned signals and public clone-heavy maps |
 
-The complete eight samples, command template, commit/dirty state, VCD SHA-256, environment, filesystem, and cache policy are stored in [`artifacts/m1/catalog-memory-A.tsv`](artifacts/m1/catalog-memory-A.tsv). The helper accepts `CATALOG_RUNS` and emits the durable TSV schema directly.
+Within each `OpenedVcd` process, 100 complete borrowed declaration-order name passes took 8,067–10,873 µs total (about 81–109 µs per pass), and 100,000 name lookups took 1,261–1,352 µs total. These internal timings intentionally exclude output allocation/serialization; they measure reusable catalog traversal and lookup.
 
-This shows the reusable compact representation can reduce peak process RSS by about 80% when consumers avoid legacy materialization. It does **not** pass G2 by itself: existing path APIs still require compatibility conversion and remain slower than the M0 list baseline. T04–T08 must measure real `OpenedVcd` access, resolve or accept the compatibility latency regression, and complete snapshot/concurrency evidence.
+The complete twelve preview process samples, internal reuse timings, command template, commit/dirty state, VCD SHA-256, environment, filesystem, and cache policy are stored in [`artifacts/m1/catalog-memory-A.tsv`](artifacts/m1/catalog-memory-A.tsv). The helper accepts `CATALOG_RUNS` and emits the durable TSV schema directly. Final T08 evidence requires at least five clean-tree samples and must be stored separately rather than relabeling this preview artifact.
+
+This shows the reusable compact representation reduces peak process RSS by about 80% when consumers avoid legacy materialization and makes repeated borrowed catalog access effectively negligible relative to a 0.5-second reparse. It does **not** pass G2 by itself: existing path APIs still require compatibility conversion in some operations. T07/T08 must complete lazy metadata, final concurrency/compatibility evidence, and resolve or formally accept any remaining one-shot compatibility regression.
 
 ## 7. Interpretation
 

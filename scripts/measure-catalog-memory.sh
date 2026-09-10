@@ -51,6 +51,7 @@ fi
 
 printf 'record\tvalue\n'
 printf 'schema\tvcd_catalog_memory_v1\n'
+printf 'evidence_status\t%s\n' "${CATALOG_EVIDENCE_STATUS:-preview_only_not_for_gate_acceptance}"
 printf 'git_commit\t%s\n' "$commit"
 printf 'git_dirty\t%s\n' "$dirty"
 printf 'rustc\t%s\n' "$(rustc -Vv | tr '\n' ';')"
@@ -62,21 +63,25 @@ printf 'vcd_path\t%s\n' "$vcd"
 printf 'vcd_size_bytes\t%s\n' "$(stat -c %s "$vcd")"
 printf 'vcd_mtime\t%s\n' "$(stat -c %y "$vcd")"
 printf 'vcd_sha256\t%s\n' "$(sha256sum "$vcd" | awk '{print $1}')"
-printf 'cache_policy\tuncontrolled; page cache not dropped; compact and compatibility alternate per run\n'
+printf 'cache_policy\tuncontrolled; page cache not dropped; compact/opened/compatibility alternate per run\n'
 printf 'runs_per_mode\t%s\n' "$runs"
 printf 'test_binary\t%s\n' "$test_bin"
-printf 'command_template\tVCD_CATALOG_PROBE=<vcd> /usr/bin/time <test-binary> --exact catalog::tests::probe_<mode>_peak_rss --ignored --nocapture\n'
+printf 'command_template\tVCD_CATALOG_PROBE=<vcd> /usr/bin/time <test-binary> --exact <module>::tests::probe_<mode>_peak_rss --ignored --nocapture\n'
 printf 'sample\tmode\trun\telapsed_s\tuser_s\tsystem_s\tmax_rss_kib\tprobe_summary\n'
 
 for ((run=1; run<=runs; run++)); do
-  for mode in compact compatibility; do
+  for mode in compact opened compatibility; do
+    case "$mode" in
+      compact|compatibility) test_name="catalog::tests::probe_${mode}_peak_rss" ;;
+      opened) test_name="opened::tests::probe_opened_list_peak_rss" ;;
+    esac
     metrics=$(mktemp "${TMPDIR:-/tmp}/vcd-catalog-memory.XXXXXX")
     output=$(mktemp "${TMPDIR:-/tmp}/vcd-catalog-output.XXXXXX")
     cleanup() { rm -f "$metrics" "$output"; }
     trap cleanup EXIT
     VCD_CATALOG_PROBE=$vcd /usr/bin/time -o "$metrics" \
       -f '%e\t%U\t%S\t%M' \
-      "$test_bin" --exact "catalog::tests::probe_${mode}_peak_rss" --ignored --nocapture \
+      "$test_bin" --exact "$test_name" --ignored --nocapture \
       >"$output" 2>&1
     probe=$(grep "mode=$mode " "$output" | tail -1 | tr '\t' ' ')
     printf 'sample\t%s\t%d\t%s\t%s\n' "$mode" "$run" "$(cat "$metrics")" "$probe"

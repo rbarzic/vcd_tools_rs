@@ -97,10 +97,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Implement RQ-M1-T04: `OpenedVcd::open`, compact-catalog accessors, and cheap clone semantics.
-2. Then implement T05/T06: independent generation-validated readers and borrowed `SignalRef`/compatibility views.
-3. Resolve the measured compatibility-list latency regression before G2; retain the accepted M0 suite as the semantic oracle.
-4. Keep metadata lazy and do not begin socket, sidecar, or cache implementation before the reusable core passes G2/G3.
+1. Implement RQ-M1-T07: lazy metadata single-flight state with deterministic failure/wakeup behavior.
+2. Complete T08: clean five-sample performance evidence, compatibility disposition, concurrency/snapshot proof, and available cross-target checks.
+3. Preserve accepted T01–T06 identity, catalog, `OpenedVcd`, independent-reader, and `SignalRef` behavior.
+4. Keep socket, sidecar, and cache implementation blocked until the reusable core passes G2/G3.
 
 ## Progress update template
 

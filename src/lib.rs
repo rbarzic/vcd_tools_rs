@@ -2,6 +2,11 @@ mod catalog;
 mod header;
 pub mod opened;
 
+pub use opened::{
+    CatalogMemoryUsage, ContentFingerprint, FileIdentity, FingerprintPolicy, GenerationId,
+    OpenOptions, OpenedBodyReader, OpenedVcd, SignalRef,
+};
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -449,8 +454,7 @@ pub fn tokenize_file(path: impl AsRef<Path>) -> Result<Parser<BufReader<File>>> 
 }
 
 pub fn list_signals_from_file(path: impl AsRef<Path>, filter: Option<&str>) -> Result<Vec<String>> {
-    let (signals, _index, _timescale) = read_signals(path)?;
-    Ok(list_signals(&signals, filter))
+    Ok(opened::OpenedVcd::open(path)?.list_signals(filter))
 }
 
 pub fn time_value_iter_from_body(

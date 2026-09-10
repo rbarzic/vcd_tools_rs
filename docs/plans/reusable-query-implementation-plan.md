@@ -257,10 +257,10 @@ Exit: Gate G2
 | RQ-M1-T01 | DONE | G1 | Define `FileIdentity`, `GenerationId`, `OpenOptions` |
 | RQ-M1-T02 | DONE | G1 | Implement compact scope/name/signal catalog |
 | RQ-M1-T03 | DONE | T02 | Consume the parsed vcd 0.7 header tree into the compact catalog |
-| RQ-M1-T04 | READY | T01,T03 | Implement `OpenedVcd::open` and accessors |
-| RQ-M1-T05 | BLOCKED | T04 | Implement independent generation-validated readers |
-| RQ-M1-T06 | BLOCKED | T04 | Add borrowed `SignalRef` and owned compatibility conversion |
-| RQ-M1-T07 | BLOCKED | T04,T05 | Add lazy metadata single-flight state |
+| RQ-M1-T04 | DONE | T01,T03 | Implement `OpenedVcd::open` and accessors |
+| RQ-M1-T05 | DONE | T04 | Implement independent generation-validated readers |
+| RQ-M1-T06 | DONE | T04 | Add borrowed `SignalRef` and owned compatibility conversion |
+| RQ-M1-T07 | READY | T04,T05 | Add lazy metadata single-flight state |
 | RQ-M1-T08 | BLOCKED | T02-T07 | Concurrency, memory, lookup, and compatibility evidence |
 
 ## RQ-M1-T01 — Identity and options
@@ -395,7 +395,37 @@ Memory/performance observation:
 - The compatibility `list` path remains slower than the M0 0.52–0.55 s baseline because it builds the compact catalog and then materializes clone-heavy public maps. This cold compatibility regression remains a known blocker for G2/T08, not an accepted final result.
 - Compact-only actual peak RSS is about 80% below compatibility materialization on VCD-A, demonstrating the reusable representation's benefit once T04 consumers avoid compatibility conversion.
 
-Scope remains limited to T01–T03: no `OpenedVcd`, metadata scan, independent reader, sidecar, cache, or server behavior was added.
+Scope remains limited to T01–T03 in the accepted first slice; no metadata scan, sidecar, cache, or server behavior was added.
+
+## M1 second-slice evidence (RQ-M1-T04 through T06)
+
+Current status: **ACCEPTED**.
+
+Reviewer decision:
+
+- RQ-M1-T04, T05, and T06 accepted;
+- default open remains bounded/header-only;
+- configured-path reopen, symlink retargeting, complete-header validation, independent cursors, completion validation, Arc ownership, and SignalRef semantics verified;
+- G2 remains open for T07/T08.
+
+Implementation evidence:
+
+- `OpenedVcd` is a public cheap-clone `Arc` handle with private immutable inner state: caller/display path, absolute configured path preserving the final symlink, diagnostic canonical target, generation, file identity, body offset, timescale, compact catalog, and open options. Compile-time tests require `OpenedVcd` and `OpenedBodyReader` to be `Send + Sync`.
+- Default `open` uses the same-handle identified-header seam and performs header parsing plus bounded beginning/end samples only. Opening the intentionally malformed-body fixture succeeds, proving body commands are not parsed during open. Strict full-content hashing remains explicit opt-in.
+- Direct borrowed APIs preserve declaration order and expose signal count, names, lookup, aliases, size/type/ID, borrowed scope components, timescale, and catalog diagnostics without exposing `SignalKey` or internal maps. Legacy `Signal`/`SignalIndex` materialization remains explicit and behavior-compatible.
+- `list_signals_from_file` now uses the compact opened catalog directly without a hidden cache. Other path APIs retain their established temporary-open behavior.
+- Each `body_reader` reopens the absolute configured path without resolving its final symlink, then validates opened-handle metadata/platform identity, the complete raw header, and bounded samples (plus full content only in strict mode) before seeking its independent handle to the stored body boundary. No `File::try_clone` cursor sharing is used.
+- `OpenedBodyReader` implements `Read + BufRead + Seek`, carries its generation, and requires explicit completion validation. `body_parser` is the M2 parser seam. Completion validation rechecks both the admitted handle and a fresh reopen of the configured path while preserving the admitted reader's logical cursor, so final-symlink retargeting is rejected.
+- Tests cover cheap clone/shared inner, stable absolute configured paths, direct order/filter/lookup/alias/scope, owned compatibility, no body parse, independent cursors, eight concurrent equivalent parsers, atomic replacement, Unix configured-symlink retarget rejection at admission and completion, append, truncate, sampled in-place mutation, complete >64 KiB header validation outside bounded samples, mutation after admission, cursor restoration after rejection, default/strict policy, and parser body start.
+- Complete serial debug suite passes with 125 non-ignored tests and 3 release diagnostics ignored. Focused release `opened`, semantic, and CLI suites pass. `cargo check --all-targets`, `cargo doc --no-deps`, new-module formatting, shell syntax, and `git diff --check` pass.
+
+Measured direct reusable access — **preview only, not G2 acceptance**:
+
+- Dirty-worktree VCD-A preview evidence is in `docs/benchmarks/artifacts/m1/catalog-memory-A.tsv` with four alternating samples per compact/opened/compatibility mode.
+- `OpenedVcd` plus a complete borrowed name pass and lookup measured 0.17–0.18 s and 78,644–79,080 KiB peak RSS versus 0.67–0.68 s and 392,864–393,108 KiB for legacy compatibility materialization.
+- After one open, 100 complete borrowed name passes took 8,067–10,873 µs total and 100,000 lookups took 1,261–1,352 µs total. Output allocation/serialization is intentionally excluded from these catalog-access timings.
+
+Remaining before G2: T07 lazy metadata and T08 final cross-target/concurrency/memory/compatibility review. T08 must capture at least five samples per mode from a clean committed tree with verified input hashes; the current four-sample artifact remains preview evidence. Windows target compilation remains CI/cross-toolchain evidence even though platform-specific identity code is target-gated.
 
 ## Gate G2 — Core representation and snapshot
 

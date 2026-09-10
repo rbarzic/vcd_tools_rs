@@ -1,6 +1,7 @@
 name: Publish Python wheels to PyPI
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -91,6 +92,9 @@ jobs:
           set -euo pipefail
           wheel=$(find dist -type f -name '*manylinux*x86_64.whl' | head -1)
           test -n "$wheel"
+          wheel=$(realpath "$wheel")
+          repo=$PWD
+          cd /tmp
           python3 -m venv /tmp/vcd-wheel-smoke
           /tmp/vcd-wheel-smoke/bin/pip install "$wheel"
           /tmp/vcd-wheel-smoke/bin/python -c 'import vcd_tools; assert hasattr(vcd_tools, "serve")'
@@ -98,7 +102,7 @@ jobs:
           chmod 700 "$dir"
           socket="$dir/server.sock"
           /tmp/vcd-wheel-smoke/bin/vcd_tools_rs serve \
-            tests/fixtures/query_semantics.vcd --socket "$socket" &
+            "$repo/tests/fixtures/query_semantics.vcd" --socket "$socket" &
           pid=$!
           cleanup() {
             kill -TERM "$pid" 2>/dev/null || true

@@ -511,8 +511,8 @@ Exit: Gate G3
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
 | RQ-M2-T01 | DONE | G2 | Query context, limits, cancellation, internal error model |
-| RQ-M2-T02 | READY | T01 | Streaming backend with target check before conversion |
-| RQ-M2-T03 | BLOCKED | T02 | Reusable extraction iterator |
+| RQ-M2-T02 | DONE | T01 | Streaming backend with target check before conversion |
+| RQ-M2-T03 | READY | T02 | Reusable extraction iterator |
 | RQ-M2-T04 | BLOCKED | T03 | Reusable find and toggle |
 | RQ-M2-T05 | BLOCKED | T03 | Timeline-provider interface and comparison adaptation |
 | RQ-M2-T06 | BLOCKED | T03-T05 | Path-based compatibility wrappers |
@@ -556,14 +556,39 @@ Remaining for review: fresh-context reviewer acceptance. T02 remains blocked unt
 
 ## RQ-M2-T02 — Optimized stream decoder
 
+Status: **ACCEPTED**.
+
+Reviewer verified cancellation/deadline precedence at timestamp and periodic checkpoints, exact command budgeting, catalog-owned requested-name sharing with duplicate multiplicity, selected-ID-first conversion, and reproducible 1/10/100-target conversion/timing evidence.
+
+Status: **IN_REVIEW**.
+
+Implementation evidence:
+
+- `src/query/stream.rs` adds a crate-private `SelectedChangeStream` over `OpenedVcd::body_parser`, forming the transport-neutral T03 seam without prematurely exposing raw backend details publicly.
+- Target resolution enforces `max_signals`, preserves request index/name/size plus alias and duplicate bindings by `IdCode`, reports missing names deterministically, and completes before reader admission.
+- Scalar/vector/real/string commands inspect ID membership and time-window inclusion before `ChangeValue` conversion. One selected body command is converted once even when aliases/duplicate requests share its ID.
+- Command count includes timestamps, irrelevant changes, dump/control commands, and parser errors. Limit N permits exactly N commands; command N+1 returns `LimitExceeded(Commands, limit=N, actual=N+1)`.
+- Context is checked before resolution/admission, at every timestamp, every 4,096 commands in non-timestamp irrelevant runs, before selected conversion, and before/after successful completion validation.
+- EOF and deliberate `end` early-stop validate the opened generation before reporting successful terminal completion. Parser errors, cancellation, deadline, and limits terminate without claiming successful completion.
+- Thirteen deterministic tests cover irrelevant vector/string/real/scalar conversion avoidance, out-of-window avoidance, exact normalization/body/alias order versus legacy extraction, duplicate Arc-backed binding multiplicity, exact command/signal limits, timestamp/interval/pre-conversion cancellation, cancellation/deadline versus budget collisions, controlled deadline, EOF/end mutation, malformed body, and decreasing-timestamp early-stop equivalence.
+- `scripts/measure-targeted-conversion.sh` and `docs/benchmarks/artifacts/m2/` provide the required release diagnostic for 1/10/100 selected IDs among 128 densely changing signals over 1,000 timestamps. All 15 runs parsed 129,000 commands and converted exactly `selected IDs × 1,000` values. Median internal decode was 4,578/4,624/12,580 µs respectively. This is conversion-count/timing evidence only; allocator calls/bytes were not measured and are not claimed.
+
+Corrective review evidence:
+
+- Timestamp and 4,096-command periodic cancellation/deadline checkpoints now run before a colliding N+1 command-budget failure, preserving cancellation-first semantics. Away from those checkpoints, exact budget enforcement is unchanged.
+- Duplicate requests clone the catalog-owned `Arc<str>` rather than allocating a new requested-name string. Tests verify pointer identity with both duplicate bindings and the catalog entry while preserving duplicate binding multiplicity.
+- Final post-correction validation passed once in debug and once in release: 165 non-ignored Rust tests passed with 4 release diagnostics ignored in each profile; 3 Python console tests passed; all five CR-002 target checks, changed-file formatting, shell syntax, Markdown links, and `git diff --check` passed.
+
+T03 handoff: expand each `SelectedChange` through `SelectedChangeStream::bindings(id_code)` in binding order. `TargetBinding` provides request index, shared catalog-backed requested name, and signal width. Apply row/result-byte limits while expanding, not in the raw decoder.
+
 Refactor command handling to inspect command ID before `ChangeValue` conversion.
 
 Acceptance:
 
-- unselected vectors/strings are not formatted or allocated;
+- unselected vectors/strings are not formatted or allocated into `ChangeValue`; parser-internal ownership is outside this decoder's control and allocator behavior is not claimed without allocator instrumentation;
 - selected normalization unchanged;
 - cancellation frequency bounded;
-- benchmark covers 1/10/100 targets among dense unrelated changes.
+- benchmark covers 1/10/100 targets among dense unrelated changes with exact conversion counts and timing.
 
 ## RQ-M2-T03 — Extraction iterator
 

@@ -1,3 +1,5 @@
+pub(crate) mod stream;
+
 use std::error::Error as StdError;
 use std::fmt;
 use std::io;

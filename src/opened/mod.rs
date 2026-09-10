@@ -78,6 +78,10 @@ impl<'a> SignalRef<'a> {
         self.metadata().full_name.as_ref()
     }
 
+    pub(crate) fn shared_name(self) -> Arc<str> {
+        Arc::clone(&self.metadata().full_name)
+    }
+
     pub fn id_code(self) -> IdCode {
         self.metadata().id_code
     }

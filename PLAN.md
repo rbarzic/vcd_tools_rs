@@ -97,9 +97,9 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Implement RQ-M2-T02: selected-ID-first streaming decoder with context checks and command budgets.
-2. Then implement T03: reusable extraction iterator with row/result limits and completion validation.
-3. Preserve the accepted M0 compatibility suite and M1 generation/completion-validation guarantees.
+1. Batch RQ-M2-T03 through T07: reusable extraction, find/toggle, provider seam, compatibility wrappers, and CLI migration.
+2. Enforce row/result-byte limits and generation completion validation across every successful query path.
+3. Preserve accepted M0 semantics and use focused tests during development; defer the expensive complete matrix to the batch gate.
 4. Keep socket, sidecar, and cache implementation blocked until the reusable query engine passes G3.
 
 ## Progress update template

@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::sync::Arc;
+#[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, bail};
 use clap::{ArgAction, Parser, Subcommand};
@@ -7,6 +11,12 @@ use log::LevelFilter;
 
 use vcd_tools_rs::opened::OpenedVcd;
 use vcd_tools_rs::query::QueryContext;
+#[cfg(unix)]
+use vcd_tools_rs::server::app::run_server;
+#[cfg(unix)]
+use vcd_tools_rs::server::runtime::RuntimeConfig;
+#[cfg(unix)]
+use vcd_tools_rs::server::service::ServiceConfig;
 use vcd_tools_rs::{
     ComparisonOptions, TimeValue, TimeWindow, format_value_for_signal, load_signal_list,
     parse_target_value,
@@ -123,6 +133,37 @@ enum Commands {
             help = "Output format (default, json, compact)"
         )]
         output: Option<String>,
+    },
+    /// Serve one immutable VCD generation over an owner-only Unix socket
+    #[cfg(unix)]
+    Serve {
+        vcd: PathBuf,
+        #[arg(long)]
+        socket: PathBuf,
+        #[arg(long, default_value_t = 4)]
+        workers: usize,
+        #[arg(long, default_value_t = 64)]
+        queue_depth: usize,
+        #[arg(long, default_value_t = 32)]
+        max_connections: usize,
+        #[arg(long, default_value_t = 8)]
+        max_active_requests: usize,
+        #[arg(long, default_value_t = 8)]
+        output_chunks: usize,
+        #[arg(long, default_value_t = 1_048_576)]
+        max_request_bytes: usize,
+        #[arg(long, default_value_t = 262_144)]
+        max_frame_bytes: usize,
+        #[arg(long, default_value_t = 120_000)]
+        max_timeout_ms: u64,
+        #[arg(long, default_value_t = 4_096)]
+        max_signals: usize,
+        #[arg(long, default_value_t = 1_000_000)]
+        max_rows: u64,
+        #[arg(long, default_value_t = 268_435_456)]
+        max_response_bytes: u64,
+        #[arg(long, default_value_t = 1_000_000_000)]
+        max_commands: u64,
     },
 }
 
@@ -473,6 +514,53 @@ fn main() -> Result<()> {
             )?;
 
             handle_compare(&result, output.as_deref())
+        }
+        #[cfg(unix)]
+        Commands::Serve {
+            vcd,
+            socket,
+            workers,
+            queue_depth,
+            max_connections,
+            max_active_requests,
+            output_chunks,
+            max_request_bytes,
+            max_frame_bytes,
+            max_timeout_ms,
+            max_signals,
+            max_rows,
+            max_response_bytes,
+            max_commands,
+        } => {
+            let runtime = RuntimeConfig {
+                max_connections,
+                max_active_requests_per_connection: max_active_requests,
+                workers,
+                queue_depth,
+                output_chunks,
+                request_line_bytes: max_request_bytes,
+                max_encoded_frame_bytes: max_frame_bytes,
+                max_timeout_ms,
+            };
+            let service = ServiceConfig {
+                max_signals,
+                max_rows,
+                max_response_bytes,
+                max_commands,
+            };
+            runtime.validate()?;
+            service.validate()?;
+            if !socket.is_absolute() {
+                bail!("--socket must be an absolute path");
+            }
+            let shutdown = Arc::new(AtomicBool::new(false));
+            let signal_shutdown = Arc::clone(&shutdown);
+            ctrlc::set_handler(move || {
+                signal_shutdown.store(true, Ordering::Release);
+            })
+            .map_err(|error| anyhow::anyhow!("failed to install signal handler: {error}"))?;
+            run_server(vcd, socket, runtime, service, shutdown)?;
+            Ok(())
         }
     }
 }

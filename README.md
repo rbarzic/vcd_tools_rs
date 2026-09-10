@@ -70,9 +70,22 @@ vcd_tools_rs find simulation.vcd \
 # Compare two VCD files
 vcd_tools_rs compare reference.vcd actual.vcd \
   [--max-mismatches 10] [--ignore-unknown] [--output json|compact]
+
+# Experimental local query server (native Linux/macOS binary only)
+mkdir -m 700 /tmp/vcd-tools-$USER
+vcd_tools_rs serve simulation.vcd \
+  --socket /tmp/vcd-tools-$USER/server.sock
 ```
 
 Global flags: `--pretty` (table output), `--log-level` (`error`/`warn`/`info`/`debug`).
+
+### Experimental server availability
+
+Server mode is available from native Unix builds and Linux/macOS release archives. It binds one VCD to an owner-only Unix-domain socket and supports `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles`, and `cancel` using protocol v1 JSON Lines.
+
+The pip-installed `vcd_tools_rs` command is a Python console wrapper and does **not** expose `serve` in v1. Build/install the native Rust binary to use server mode. The socket parent directory must already exist, be owned by the current user, and have no group/other permissions.
+
+See [the protocol contract](docs/design/unix-json-protocol-v1.md) for request schemas and limits.
 
 See [CLI_REFERENCE.md](CLI_REFERENCE.md) for the complete option reference.
 

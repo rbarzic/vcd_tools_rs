@@ -85,6 +85,10 @@ impl OpenedTimeValueIter {
         self.logical_bytes
     }
 
+    pub fn commands_processed(&self) -> u64 {
+        self.stream.command_count()
+    }
+
     pub fn validate_current_generation(&mut self) -> QueryResult<()> {
         self.context.check()?;
         self.stream.validate_current_generation()?;

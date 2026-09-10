@@ -13,6 +13,7 @@ A fast streaming VCD (Value Change Dump) analysis tool written in Rust, also ava
   - [toggle](#toggle)
   - [find](#find)
   - [compare](#compare)
+  - [serve](#serve)
 - [Python API](#python-api)
 - [vcd2trace](#vcd2trace)
 - [Output Formats](#output-formats)
@@ -282,6 +283,32 @@ vcd_tools_rs compare reference.vcd actual.vcd --max-mismatches 5 --ignore-unknow
 vcd_tools_rs compare reference.vcd actual.vcd --signals-only "tb.clk,tb.rst_n"
 vcd_tools_rs compare reference.vcd actual.vcd --start 0 --end 1000000
 ```
+
+---
+
+### serve
+
+Run the experimental native Unix-domain query server for one VCD.
+
+> `serve` is available only in the native Linux/macOS Rust binary. The pip-installed Python console does not expose this command in protocol v1.
+
+**Usage:**
+```sh
+vcd_tools_rs serve [OPTIONS] --socket <SOCKET> <VCD>
+```
+
+The socket path must be absolute. Its parent directory must already exist, be owned by the current user, and have no group/other permissions.
+
+```sh
+mkdir -m 700 /tmp/vcd-tools-$USER
+vcd_tools_rs serve simulation.vcd --socket /tmp/vcd-tools-$USER/server.sock
+```
+
+Important bounded options include `--workers`, `--queue-depth`, `--max-connections`, `--max-active-requests`, `--max-request-bytes`, `--max-frame-bytes`, `--max-timeout-ms`, `--max-signals`, `--max-rows`, `--max-response-bytes`, and `--max-commands`. `--help` shows their finite defaults.
+
+The JSON Lines protocol supports `ping`, `describe`, streamed `list`, `metadata`, streamed `extract`, `find`, `toggles`, and `cancel`. It intentionally does not expose compare, cache, shutdown, sidecar, or arbitrary-path methods. See [`docs/design/unix-json-protocol-v1.md`](docs/design/unix-json-protocol-v1.md).
+
+Stop the foreground server with Ctrl-C. The owned socket is removed during graceful shutdown.
 
 ---
 

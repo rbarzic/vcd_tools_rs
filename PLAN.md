@@ -46,6 +46,7 @@ Recommended v1 product boundary:
 - `IN_PROGRESS` — implementation has started.
 - `IN_REVIEW` — implementation is complete and under review.
 - `DONE` — acceptance criteria and validation evidence are recorded.
+- `MVP_AVAILABLE` — the scoped MVP is runnable and focused tests pass; release-hardening gate remains deferred.
 - `DEFERRED` — intentionally postponed without rejecting the work.
 - `REJECTED` — explicitly removed from scope.
 
@@ -59,7 +60,7 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 | M1 | Compact catalog and `OpenedVcd` | DONE | G1 passed | G2 passed |
 | M2 | Transport-neutral query engine and compatibility wrappers | DONE | G2 passed | G3 passed |
 | M3 | Technical spikes: offsets, snapshot readers, scheduler, serialization | DONE | G3 passed | G4 passed |
-| M4 | Experimental bounded Unix-socket server using streaming backend | IN_PROGRESS | G4 passed | G5 |
+| M4 | Experimental bounded Unix-socket server using streaming backend | MVP_AVAILABLE | G4 passed | G5 hardening deferred |
 | M5 | Sparse persistent sidecar | BLOCKED | Offset spike approved | G6 |
 | M6 | Selective/hot-signal timeline cache | BLOCKED | M2 and workload evidence | G7 |
 | M7 | Persistent Python `Vcd`, hardening, release candidate | BLOCKED | M4 plus approved optional backends | G8 |
@@ -73,7 +74,7 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 | G2 | Accept compact catalog and snapshot model | PASSED | Reviewer accepted T08, 79.9% RSS reduction, faster native list, concurrency/snapshot tests, and CR-002 all-target checks |
 | G3 | Accept query-engine refactor | PASSED | Reviewer accepted 177 debug/release Rust tests, compiled Python compatibility, five target checks, and T09 deferral |
 | G4 | Select feasible server and index mechanisms | PASSED | Reviewer accepted safe offsets, SoA events, bounded std scheduler, and frozen native protocol |
-| G5 | Ship experimental streaming server | BLOCKED | Protocol, limits, cancellation, security, soak, portability pass |
+| G5 | Ship experimental streaming server | DEFERRED | MVP focused tests pass; long soak, peer credentials, native macOS runtime, and packaging remain |
 | G6 | Enable sparse sidecar as opt-in | BLOCKED | Resume correctness, corruption/invalidation, speed and size targets pass |
 | G7 | Enable selective cache as opt-in | BLOCKED | Ordering equivalence, byte budget, single-flight and speed targets pass |
 | G8 | Publish stable feature | BLOCKED | Full CI, documentation, packaging, fuzzing, rollback and RC evidence pass |
@@ -97,10 +98,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Implement the MVP service batch: T06 methods, T07 generation behavior, T08 `serve` CLI integration, and T09 end-to-end client tests.
-2. Use the accepted bounded runtime and protocol directly; no sidecar/cache/compare/shutdown methods in v1.
-3. Run focused end-to-end tests and one final M4 review; defer long soak/release hardening to T10/G5.
-4. Preserve native-only server distribution and document that the pip console does not expose `serve`.
+1. Commit and smoke the runnable native Unix server MVP.
+2. Keep T10/G5 long soak, peer-credential hardening, native macOS runtime, and packaging explicitly deferred.
+3. Do not add sidecar/cache/compare/shutdown methods to protocol v1.
+4. Preserve native-only server distribution; the pip console does not expose `serve`.
 
 ## Progress update template
 

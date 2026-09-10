@@ -13,8 +13,9 @@ use serde_json::{Value, json};
 use vcd_tools_rs::server::listener::BoundUnixListener;
 use vcd_tools_rs::server::protocol::{Request, ResponseFrame, encode_json_line};
 use vcd_tools_rs::server::runtime::{
-    ConnectionLimiter, Dispatcher, OutputSink, RequestContext, RuntimeConfig, Scheduler,
-    serve_connection,
+    ConnectionLimiter, Dispatcher, HARD_MAX_ACTIVE_REQUESTS_PER_CONNECTION, HARD_MAX_CONNECTIONS,
+    HARD_MAX_OUTPUT_CHUNKS, HARD_MAX_QUEUE_DEPTH, HARD_MAX_TIMEOUT_MS, HARD_MAX_WORKERS,
+    OutputSink, RequestContext, RuntimeConfig, Scheduler, serve_connection,
 };
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
@@ -707,4 +708,38 @@ fn malformed_and_oversized_frames_emit_transport_error_and_close() {
         assert!(scheduler.stats().forced_disconnects >= 1);
     }
     handle.join().expect("connection thread");
+}
+
+#[test]
+fn every_runtime_hard_max_accepts_max_and_rejects_max_plus_one() {
+    let fields: Vec<(fn(&mut RuntimeConfig, usize), usize)> = vec![
+        (|c, v| c.max_connections = v, HARD_MAX_CONNECTIONS),
+        (
+            |c, v| c.max_active_requests_per_connection = v,
+            HARD_MAX_ACTIVE_REQUESTS_PER_CONNECTION,
+        ),
+        (|c, v| c.workers = v, HARD_MAX_WORKERS),
+        (|c, v| c.queue_depth = v, HARD_MAX_QUEUE_DEPTH),
+        (|c, v| c.output_chunks = v, HARD_MAX_OUTPUT_CHUNKS),
+        (
+            |c, v| c.request_line_bytes = v,
+            vcd_tools_rs::server::protocol::MAX_REQUEST_LINE_BYTES,
+        ),
+        (
+            |c, v| c.max_encoded_frame_bytes = v,
+            vcd_tools_rs::server::protocol::CHUNK_BYTES as usize,
+        ),
+    ];
+    for (set, maximum) in fields {
+        let mut config = RuntimeConfig::default();
+        set(&mut config, maximum);
+        config.validate().expect("hard maximum accepted");
+        set(&mut config, maximum + 1);
+        assert!(config.validate().is_err(), "max+1 must be rejected");
+    }
+    let mut config = RuntimeConfig::default();
+    config.max_timeout_ms = HARD_MAX_TIMEOUT_MS;
+    config.validate().expect("timeout maximum accepted");
+    config.max_timeout_ms = HARD_MAX_TIMEOUT_MS + 1;
+    assert!(config.validate().is_err());
 }

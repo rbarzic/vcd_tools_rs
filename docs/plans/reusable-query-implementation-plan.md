@@ -818,11 +818,11 @@ Exit: Gate G5
 | RQ-M4-T03 | DONE | T01 | Bounded scheduler and request registry |
 | RQ-M4-T04 | DONE | T02,T03 | Connection reader/writer and backpressure |
 | RQ-M4-T05 | DONE | T03,T04 | Cancellation/deadline/disconnect handling |
-| RQ-M4-T06 | READY | T01,T05 | `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles` |
-| RQ-M4-T07 | BLOCKED | T06 | Generation invalidation/reopen behavior |
-| RQ-M4-T08 | BLOCKED | T02-T07 | CLI/binary integration and configuration validation |
-| RQ-M4-T09 | BLOCKED | T08 | Race-free test client and end-to-end suite |
-| RQ-M4-T10 | BLOCKED | T08,T09 | Load, soak, leak, security, and portability evidence |
+| RQ-M4-T06 | DONE | T01,T05 | `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles` |
+| RQ-M4-T07 | DONE | T06 | Generation invalidation/reopen behavior |
+| RQ-M4-T08 | DONE | T02-T07 | CLI/binary integration and configuration validation |
+| RQ-M4-T09 | DONE | T08 | Race-free test client and end-to-end suite |
+| RQ-M4-T10 | DEFERRED | T08,T09 | Load, soak, leak, security, and portability evidence |
 
 ## RQ-M4-T01 — Protocol implementation
 
@@ -914,6 +914,37 @@ Status: **ACCEPTED**.
 - Focused `protocol_v1` and `server_runtime` suites pass 29 tests with zero failures; host and Windows `cargo check --all-targets`, changed-file formatting, and diff checks pass.
 - Dispatcher is a test seam only; production methods remain T06.
 - Evidence: `docs/benchmarks/artifacts/m4/runtime-validation.md`.
+
+## M4 T06–T09 server MVP evidence
+
+Status: **MVP ACCEPTED; T10/G5 HARDENING DEFERRED**.
+
+- `VcdService` implements exactly the eight frozen v1 methods; cancel remains connection-runtime special. Optional compare/cache/shutdown/sidecar methods are absent.
+- Streamed list/extract enforce 1,024-row and 256 KiB frame caps, actual cumulative JSONL response bytes, terminal reserve, query limits, cancellation/deadline, legal lifecycle, and tagged value/width output. Expensive scan permits are released before bounded output sends.
+- `GenerationSlot` validates before admission and atomically swaps a fully opened replacement between requests. In-flight requests retain their old `Arc<OpenedVcd>` and completion validation reports stale rather than mixing generations.
+- Native Unix `serve` adds finite runtime/query flags, validation before bind, nonblocking bounded accept loop, connection-permit enforcement, finished-thread reaping, Ctrl-C shutdown, join/cleanup, and owner-only socket requirements. Windows all-target checking remains green; the Python console has no serve command.
+- Real filesystem Unix-socket tests cover every v1 method, partial and multiple request writes, request interleaving, active cancellation, protocol/query errors, response limits, atomic VCD replacement generation, disconnect survival, startup, and socket cleanup. Three end-to-end tests passed five consecutive focused runs.
+- Final safety pass makes metadata body parsing context/command cancellable, resets transient cancelled attempts so waiters can re-elect, and rechecks context/source immediately before cached unary publication.
+- Runtime/service hard maxima cover every thread/allocation-driving setting; deterministic max/max+1 and native CLI startup tests prove invalid values fail before bind.
+- Every accept-loop exit now sets shutdown, joins accepted connections, cleans the owned socket, and preserves the original fatal accept error.
+- Race-controlled real-socket tests cover active metadata cancellation and next-scan permit release, cached unary stale, mid-stream stale, encoded splitting/terminal reserve, connection saturation/disconnect cleanup, native SIGTERM cleanup, and invalid configuration.
+- Final focused suites: 27 opened metadata tests passed with 1 diagnostic ignored, 15 protocol tests passed, 15 runtime tests passed, and 10 real Unix-socket/binary E2E tests passed. Host `cargo check --all-targets`, changed-file formatting, and diff checks pass.
+- Long duration load/soak, peer-credential enforcement, native macOS runtime, release packaging, and hostile-client telemetry remain T10/G5 risks; T10 is deliberately deferred from MVP completion.
+
+Runnable smoke:
+
+```sh
+cargo build --release --bin vcd_tools_rs
+DIR=$(mktemp -d); chmod 700 "$DIR"
+./target/release/vcd_tools_rs serve tests/fixtures/query_semantics.vcd --socket "$DIR/server.sock"
+# In another shell:
+python3 - "$DIR/server.sock" <<'PY'
+import json, socket, sys
+s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])
+s.sendall(b'{"v":1,"id":"smoke","method":"ping","params":{}}\n')
+print(json.loads(s.makefile().readline()))
+PY
+```
 
 ## RQ-M4-T06 — Service methods
 

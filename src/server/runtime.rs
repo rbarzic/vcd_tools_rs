@@ -13,14 +13,19 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::query::CancellationToken;
+use crate::query::{CancellationToken, QueryContext, QueryLimits};
 use crate::server::protocol::{
     CancelResult, JsonLineAccumulator, ProtocolError, ProtocolErrorCode, Request, RequestMethod,
     ResponseFrame, decode_request_with_active, encode_json_line,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
-const HARD_MAX_TIMEOUT_MS: u64 = 31_536_000_000; // one year
+pub const HARD_MAX_CONNECTIONS: usize = 256;
+pub const HARD_MAX_ACTIVE_REQUESTS_PER_CONNECTION: usize = 64;
+pub const HARD_MAX_WORKERS: usize = 64;
+pub const HARD_MAX_QUEUE_DEPTH: usize = 4_096;
+pub const HARD_MAX_OUTPUT_CHUNKS: usize = 256;
+pub const HARD_MAX_TIMEOUT_MS: u64 = 3_600_000;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
@@ -52,13 +57,20 @@ impl Default for RuntimeConfig {
 impl RuntimeConfig {
     pub fn validate(&self) -> io::Result<()> {
         if self.max_connections == 0
+            || self.max_connections > HARD_MAX_CONNECTIONS
             || self.max_active_requests_per_connection == 0
+            || self.max_active_requests_per_connection > HARD_MAX_ACTIVE_REQUESTS_PER_CONNECTION
             || self.workers == 0
+            || self.workers > HARD_MAX_WORKERS
             || self.queue_depth == 0
+            || self.queue_depth > HARD_MAX_QUEUE_DEPTH
             || self.output_chunks == 0
+            || self.output_chunks > HARD_MAX_OUTPUT_CHUNKS
             || self.request_line_bytes == 0
+            || self.request_line_bytes > crate::server::protocol::MAX_REQUEST_LINE_BYTES
             || self.max_encoded_frame_bytes
                 < crate::server::protocol::TERMINAL_FRAME_RESERVE_BYTES as usize
+            || self.max_encoded_frame_bytes > crate::server::protocol::CHUNK_BYTES as usize
             || self.max_timeout_ms == 0
             || self.max_timeout_ms > HARD_MAX_TIMEOUT_MS
             || Instant::now()
@@ -67,7 +79,7 @@ impl RuntimeConfig {
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "server runtime limits must be non-zero",
+                "server runtime limits are outside supported bounds",
             ));
         }
         Ok(())
@@ -279,6 +291,15 @@ impl RequestContext {
 
     pub fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
+    }
+
+    pub fn query_context(&self, mut limits: QueryLimits) -> QueryContext {
+        if let Some(deadline) = self.deadline {
+            limits = limits.with_deadline(deadline);
+        }
+        QueryContext::new()
+            .with_cancellation(self.cancellation.clone())
+            .with_limits(limits)
     }
 
     pub fn check(&self) -> Result<(), ProtocolError> {
@@ -808,7 +829,23 @@ pub fn serve_connection(
     stream: UnixStream,
     scheduler: Arc<Scheduler>,
     config: &RuntimeConfig,
+    permit: ConnectionPermit,
+) -> io::Result<()> {
+    serve_connection_with_shutdown(
+        stream,
+        scheduler,
+        config,
+        permit,
+        Arc::new(AtomicBool::new(false)),
+    )
+}
+
+pub fn serve_connection_with_shutdown(
+    stream: UnixStream,
+    scheduler: Arc<Scheduler>,
+    config: &RuntimeConfig,
     _permit: ConnectionPermit,
+    shutdown: Arc<AtomicBool>,
 ) -> io::Result<()> {
     let mut reader = stream.try_clone()?;
     reader.set_read_timeout(Some(Duration::from_millis(10)))?;
@@ -862,7 +899,7 @@ pub fn serve_connection(
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                if state.is_disconnected() {
+                if state.is_disconnected() || shutdown.load(Ordering::Acquire) {
                     break 'read Ok(());
                 }
                 continue 'read;

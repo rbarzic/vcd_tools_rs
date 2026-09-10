@@ -163,7 +163,6 @@ impl SelectedChangeStream {
         self.context.check()
     }
 
-    #[cfg(test)]
     pub(crate) fn command_count(&self) -> u64 {
         self.command_count
     }

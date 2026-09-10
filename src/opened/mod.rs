@@ -4,13 +4,13 @@ use std::fmt;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use vcd::{IdCode, Parser, VarType};
 
 use crate::catalog::{CatalogMemoryEstimate, SignalCatalog, SignalKey};
 use crate::header::read_identified_compact_header;
-use crate::{Result, Signal, SignalIndex, Timescale};
+use crate::{Result, Signal, SignalIndex, Timescale, VcdError, VcdMeta};
 
 pub use identity::{
     ContentFingerprint, FileIdentity, FingerprintPolicy, GenerationId, OpenOptions,
@@ -103,6 +103,338 @@ impl<'a> SignalRef<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+enum CachedMetadataError {
+    Io {
+        kind: io::ErrorKind,
+        message: Arc<str>,
+    },
+    MissingEndDefinitions,
+    DuplicateSignal(Arc<str>),
+    MissingSignals(Arc<str>),
+    MissingSignal(Arc<str>),
+    InvalidOccurrence,
+    Parse(Arc<str>),
+    BuilderPanicked,
+}
+
+impl CachedMetadataError {
+    fn capture(error: &VcdError) -> Self {
+        match error {
+            VcdError::Io(error) => Self::Io {
+                kind: error.kind(),
+                message: Arc::from(error.to_string()),
+            },
+            VcdError::MissingEndDefinitions => Self::MissingEndDefinitions,
+            VcdError::DuplicateSignal(signal) => Self::DuplicateSignal(Arc::from(signal.as_str())),
+            VcdError::MissingSignals(signals) => Self::MissingSignals(Arc::from(signals.as_str())),
+            VcdError::MissingSignal(signal) => Self::MissingSignal(Arc::from(signal.as_str())),
+            VcdError::InvalidOccurrence => Self::InvalidOccurrence,
+            VcdError::Parse(message) => Self::Parse(Arc::from(message.as_str())),
+        }
+    }
+
+    fn to_error(&self) -> VcdError {
+        match self {
+            Self::Io { kind, message } => VcdError::Io(io::Error::new(*kind, message.to_string())),
+            Self::MissingEndDefinitions => VcdError::MissingEndDefinitions,
+            Self::DuplicateSignal(signal) => VcdError::DuplicateSignal(signal.to_string()),
+            Self::MissingSignals(signals) => VcdError::MissingSignals(signals.to_string()),
+            Self::MissingSignal(signal) => VcdError::MissingSignal(signal.to_string()),
+            Self::InvalidOccurrence => VcdError::InvalidOccurrence,
+            Self::Parse(message) => VcdError::Parse(message.to_string()),
+            Self::BuilderPanicked => VcdError::Parse("metadata builder panicked".to_string()),
+        }
+    }
+}
+
+/// Attempt-stability invariant:
+///
+/// A caller that observes `Building` registers against that attempt before
+/// waiting. A failed (or panicked) attempt retains its terminal error and the
+/// count of registered waiters. Retry cannot replace that outcome until every
+/// registered waiter has reacquired the lock and acknowledged it. Thus only
+/// one terminal attempt is retained, bounding state while preventing a racing
+/// retry from making an old waiter observe a newer attempt.
+#[derive(Debug)]
+struct MetadataState {
+    next_attempt: u64,
+    phase: MetadataPhase,
+}
+
+#[derive(Debug)]
+enum MetadataPhase {
+    Absent,
+    Building {
+        attempt: u64,
+        waiters: usize,
+    },
+    Ready(Arc<VcdMeta>),
+    Failed {
+        attempt: u64,
+        error: CachedMetadataError,
+        pending_waiters: usize,
+    },
+}
+
+#[derive(Debug)]
+struct MetadataCache {
+    state: Mutex<MetadataState>,
+    changed: Condvar,
+    #[cfg(test)]
+    test_hooks: MetadataTestHooks,
+}
+
+impl MetadataCache {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(MetadataState {
+                next_attempt: 1,
+                phase: MetadataPhase::Absent,
+            }),
+            changed: Condvar::new(),
+            #[cfg(test)]
+            test_hooks: MetadataTestHooks::new(),
+        }
+    }
+
+    fn lock_state(&self) -> MutexGuard<'_, MetadataState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn wait_for_change<'a>(
+        &'a self,
+        state: MutexGuard<'a, MetadataState>,
+    ) -> MutexGuard<'a, MetadataState> {
+        let state = self
+            .changed
+            .wait(state)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        #[cfg(test)]
+        {
+            // Drop the state lock while the deterministic wake hook pauses.
+            // Attempt waiter accounting guarantees that retry cannot erase the
+            // terminal outcome before this caller reacquires the lock.
+            drop(state);
+            self.test_hooks.after_wait_woken();
+            return self.lock_state();
+        }
+        #[cfg(not(test))]
+        state
+    }
+
+    fn get_or_build<F>(&self, build: F) -> Result<Arc<VcdMeta>>
+    where
+        F: FnOnce() -> Result<VcdMeta>,
+    {
+        let mut state = self.lock_state();
+        let mut waiting_for = None;
+        let attempt = loop {
+            match &mut state.phase {
+                MetadataPhase::Ready(metadata) => return Ok(Arc::clone(metadata)),
+                MetadataPhase::Failed {
+                    attempt,
+                    error,
+                    pending_waiters,
+                } => {
+                    let result = Err(error.to_error());
+                    if waiting_for == Some(*attempt) {
+                        debug_assert!(*pending_waiters > 0);
+                        *pending_waiters -= 1;
+                        let last_waiter = *pending_waiters == 0;
+                        drop(state);
+                        if last_waiter {
+                            self.changed.notify_all();
+                        }
+                    }
+                    return result;
+                }
+                MetadataPhase::Building { attempt, waiters } => {
+                    match waiting_for {
+                        Some(expected) => debug_assert_eq!(expected, *attempt),
+                        None => {
+                            *waiters += 1;
+                            waiting_for = Some(*attempt);
+                        }
+                    }
+                    state = self.wait_for_change(state);
+                }
+                MetadataPhase::Absent => {
+                    debug_assert!(waiting_for.is_none());
+                    let attempt = state.next_attempt;
+                    state.next_attempt = state.next_attempt.checked_add(1).ok_or_else(|| {
+                        VcdError::Parse("metadata attempt identifier space exhausted".to_string())
+                    })?;
+                    state.phase = MetadataPhase::Building {
+                        attempt,
+                        waiters: 0,
+                    };
+                    break attempt;
+                }
+            }
+        };
+        drop(state);
+
+        let mut guard = MetadataBuildGuard {
+            cache: self,
+            attempt,
+            armed: true,
+        };
+        #[cfg(test)]
+        self.test_hooks.before_build();
+        let result = build();
+        let mut state = self.lock_state();
+        let waiters = match &state.phase {
+            MetadataPhase::Building {
+                attempt: active,
+                waiters,
+            } if *active == attempt => *waiters,
+            _ => panic!("metadata attempt changed while its builder was active"),
+        };
+        match result {
+            Ok(metadata) => {
+                let metadata = Arc::new(metadata);
+                state.phase = MetadataPhase::Ready(Arc::clone(&metadata));
+                guard.armed = false;
+                drop(state);
+                self.changed.notify_all();
+                Ok(metadata)
+            }
+            Err(error) => {
+                state.phase = MetadataPhase::Failed {
+                    attempt,
+                    error: CachedMetadataError::capture(&error),
+                    pending_waiters: waiters,
+                };
+                guard.armed = false;
+                drop(state);
+                self.changed.notify_all();
+                Err(error)
+            }
+        }
+    }
+
+    fn retry_failed<F>(&self, build: F) -> Result<Arc<VcdMeta>>
+    where
+        F: FnOnce() -> Result<VcdMeta>,
+    {
+        let mut state = self.lock_state();
+        loop {
+            match &state.phase {
+                MetadataPhase::Failed {
+                    pending_waiters: 0, ..
+                } => {
+                    state.phase = MetadataPhase::Absent;
+                    break;
+                }
+                MetadataPhase::Failed { .. } => {
+                    state = self.wait_for_change(state);
+                }
+                _ => {
+                    drop(state);
+                    return self.get_or_build(build);
+                }
+            }
+        }
+        drop(state);
+        self.get_or_build(build)
+    }
+
+    fn is_ready(&self) -> bool {
+        matches!(self.lock_state().phase, MetadataPhase::Ready(_))
+    }
+}
+
+struct MetadataBuildGuard<'a> {
+    cache: &'a MetadataCache,
+    attempt: u64,
+    armed: bool,
+}
+
+impl Drop for MetadataBuildGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let mut state = self.cache.lock_state();
+        let waiters = match &state.phase {
+            MetadataPhase::Building { attempt, waiters } if *attempt == self.attempt => *waiters,
+            _ => return,
+        };
+        state.phase = MetadataPhase::Failed {
+            attempt: self.attempt,
+            error: CachedMetadataError::BuilderPanicked,
+            pending_waiters: waiters,
+        };
+        drop(state);
+        self.cache.changed.notify_all();
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct MetadataTestHooks {
+    scans: std::sync::atomic::AtomicUsize,
+    pause: Mutex<Option<MetadataTestPause>>,
+    fail_once: std::sync::atomic::AtomicBool,
+    panic_once: std::sync::atomic::AtomicBool,
+    after_wait: Mutex<Option<MetadataTestPause>>,
+    before_validation: Mutex<Option<MetadataTestPause>>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+struct MetadataTestPause {
+    reached: Arc<std::sync::Barrier>,
+    resume: Arc<std::sync::Barrier>,
+}
+
+#[cfg(test)]
+impl MetadataTestHooks {
+    fn new() -> Self {
+        Self {
+            scans: std::sync::atomic::AtomicUsize::new(0),
+            pause: Mutex::new(None),
+            fail_once: std::sync::atomic::AtomicBool::new(false),
+            panic_once: std::sync::atomic::AtomicBool::new(false),
+            after_wait: Mutex::new(None),
+            before_validation: Mutex::new(None),
+        }
+    }
+
+    fn pause(slot: &Mutex<Option<MetadataTestPause>>) {
+        let pause = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(pause) = pause {
+            pause.reached.wait();
+            pause.resume.wait();
+        }
+    }
+
+    fn before_build(&self) {
+        self.scans.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self::pause(&self.pause);
+        if self
+            .panic_once
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            panic!("injected metadata builder panic");
+        }
+    }
+
+    fn after_wait_woken(&self) {
+        Self::pause(&self.after_wait);
+    }
+
+    fn before_validation(&self) {
+        Self::pause(&self.before_validation);
+    }
+}
+
 #[derive(Debug)]
 struct OpenedVcdInner {
     display_path: PathBuf,
@@ -114,6 +446,7 @@ struct OpenedVcdInner {
     timescale: Option<Timescale>,
     catalog: SignalCatalog,
     options: OpenOptions,
+    metadata: MetadataCache,
 }
 
 /// One immutable VCD generation with a reusable compact signal catalog.
@@ -159,6 +492,7 @@ impl OpenedVcd {
                 timescale: header.timescale,
                 catalog: header.catalog,
                 options,
+                metadata: MetadataCache::new(),
             }),
         })
     }
@@ -285,6 +619,58 @@ impl OpenedVcd {
             .identity
             .validate_open_file(&mut file, self.inner.options.fingerprint_policy())
     }
+
+    /// Return exact body time bounds, scanning the body only on the first call.
+    ///
+    /// Concurrent callers share one scan and receive the same immutable result.
+    /// A failed scan is cached so waiters observe one deterministic failure;
+    /// [`OpenedVcd::retry_metadata`] explicitly starts a new attempt. Query
+    /// cancellation is intentionally deferred to the M2 `QueryContext` rather
+    /// than adding a conflicting metadata-only cancellation API.
+    pub fn metadata(&self) -> Result<Arc<VcdMeta>> {
+        self.inner.metadata.get_or_build(|| self.compute_metadata())
+    }
+
+    /// Retry metadata after a cached failed attempt.
+    ///
+    /// Ready metadata is returned without another scan. Concurrent retry
+    /// callers coalesce behind one builder. If callers are still waking from
+    /// the failed attempt, retry waits for them to acknowledge that exact
+    /// failure before replacing it with a new attempt.
+    pub fn retry_metadata(&self) -> Result<Arc<VcdMeta>> {
+        self.inner.metadata.retry_failed(|| self.compute_metadata())
+    }
+
+    /// Whether exact metadata is already available without a body scan.
+    pub fn has_cached_metadata(&self) -> bool {
+        self.inner.metadata.is_ready()
+    }
+
+    fn compute_metadata(&self) -> Result<VcdMeta> {
+        #[cfg(test)]
+        if self
+            .inner
+            .metadata
+            .test_hooks
+            .fail_once
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(VcdError::Parse(
+                "injected metadata build failure".to_string(),
+            ));
+        }
+        let mut parser = self.body_parser()?;
+        let (start_time, end_time) = crate::compute_time_bounds_in_place(&mut parser)?;
+        #[cfg(test)]
+        self.inner.metadata.test_hooks.before_validation();
+        parser.reader().validate_complete()?;
+        Ok(VcdMeta {
+            timescale: self.inner.timescale.clone(),
+            signal_count: self.inner.catalog.len(),
+            start_time,
+            end_time,
+        })
+    }
 }
 
 /// Independently positioned body reader for one [`OpenedVcd`] generation.
@@ -360,9 +746,10 @@ impl Seek for OpenedBodyReader {
 #[cfg(test)]
 mod tests {
     use std::io::{Read as _, Seek as _, Write as _};
-    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Barrier};
     use std::thread;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
@@ -381,6 +768,41 @@ mod tests {
         let path = directory.path().join("wave.vcd");
         std::fs::copy(SEMANTICS, &path).expect("copy fixture");
         (directory, path)
+    }
+
+    fn metadata_pause() -> (MetadataTestPause, Arc<Barrier>, Arc<Barrier>) {
+        metadata_pause_for(1)
+    }
+
+    fn metadata_pause_for(
+        paused_workers: usize,
+    ) -> (MetadataTestPause, Arc<Barrier>, Arc<Barrier>) {
+        let reached = Arc::new(Barrier::new(paused_workers + 1));
+        let resume = Arc::new(Barrier::new(paused_workers + 1));
+        (
+            MetadataTestPause {
+                reached: Arc::clone(&reached),
+                resume: Arc::clone(&resume),
+            },
+            reached,
+            resume,
+        )
+    }
+
+    fn wait_for_metadata_waiters(opened: &OpenedVcd, expected: usize) {
+        for _ in 0..100_000 {
+            let state = opened.inner.metadata.lock_state();
+            let registered = matches!(
+                state.phase,
+                MetadataPhase::Building { waiters, .. } if waiters == expected
+            );
+            drop(state);
+            if registered {
+                return;
+            }
+            thread::yield_now();
+        }
+        panic!("metadata waiters did not register");
     }
 
     fn replace_file(replacement: &Path, destination: &Path) {
@@ -634,6 +1056,418 @@ mod tests {
             repeated_listed_bytes,
             repeated_lookup_size,
         ));
+    }
+
+    #[test]
+    fn metadata_is_lazy_exact_and_ready_result_is_shared() {
+        for (path, expected) in [
+            (SEMANTICS, (0, 25)),
+            ("tests/fixtures/empty_body.vcd", (0, 0)),
+            ("tests/fixtures/dumpvars_no_timestamp.vcd", (0, 0)),
+            ("tests/fixtures/decreasing_timestamps.vcd", (0, 12)),
+        ] {
+            let opened = OpenedVcd::open(path).expect("open");
+            assert!(!opened.has_cached_metadata());
+            assert_eq!(
+                opened
+                    .inner
+                    .metadata
+                    .test_hooks
+                    .scans
+                    .load(Ordering::SeqCst),
+                0
+            );
+            let first = opened.metadata().expect("metadata");
+            assert_eq!((first.start_time, first.end_time), expected);
+            assert_eq!(first.signal_count, opened.signal_count());
+            assert_eq!(first.timescale.as_ref(), opened.timescale());
+            assert!(opened.has_cached_metadata());
+            let second = opened.metadata().expect("cached metadata");
+            assert!(Arc::ptr_eq(&first, &second));
+            assert_eq!(
+                opened
+                    .inner
+                    .metadata
+                    .test_hooks
+                    .scans
+                    .load(Ordering::SeqCst),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_metadata_callers_share_exactly_one_scan() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("pause lock") = Some(pause);
+        let start = Arc::new(Barrier::new(17));
+        let workers = (0..16)
+            .map(|_| {
+                let opened = opened.clone();
+                let start = Arc::clone(&start);
+                thread::spawn(move || {
+                    start.wait();
+                    opened.metadata().expect("metadata")
+                })
+            })
+            .collect::<Vec<_>>();
+        start.wait();
+        reached.wait();
+        resume.wait();
+        let results = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker"))
+            .collect::<Vec<_>>();
+        assert!(
+            results
+                .iter()
+                .all(|metadata| Arc::ptr_eq(metadata, &results[0]))
+        );
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_metadata_is_shared_and_explicit_retry_rebuilds() {
+        let opened = OpenedVcd::open("tests/fixtures/malformed_body.vcd").expect("open header");
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("pause lock") = Some(pause);
+        let start = Arc::new(Barrier::new(9));
+        let workers = (0..8)
+            .map(|_| {
+                let opened = opened.clone();
+                let start = Arc::clone(&start);
+                thread::spawn(move || {
+                    start.wait();
+                    opened
+                        .metadata()
+                        .expect_err("malformed metadata")
+                        .to_string()
+                })
+            })
+            .collect::<Vec<_>>();
+        start.wait();
+        reached.wait();
+        resume.wait();
+        let errors = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker"))
+            .collect::<Vec<_>>();
+        assert!(errors.iter().all(|error| error == &errors[0]));
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("pause lock") = None;
+        assert!(!opened.has_cached_metadata());
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            1
+        );
+        assert_eq!(
+            opened.metadata().expect_err("cached failure").to_string(),
+            errors[0]
+        );
+        assert!(opened.retry_metadata().is_err());
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            2
+        );
+    }
+
+    #[test]
+    fn retry_cannot_supersede_failure_before_registered_waiters_observe_it() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        opened
+            .inner
+            .metadata
+            .test_hooks
+            .fail_once
+            .store(true, Ordering::SeqCst);
+
+        let (build_pause, build_reached, build_resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("build pause lock") = Some(build_pause);
+        let (wake_pause, wake_reached, wake_resume) = metadata_pause_for(2);
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .after_wait
+            .lock()
+            .expect("wake pause lock") = Some(wake_pause);
+
+        let builder = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata())
+        };
+        build_reached.wait();
+        let waiters = (0..2)
+            .map(|_| {
+                let opened = opened.clone();
+                thread::spawn(move || {
+                    opened
+                        .metadata()
+                        .expect_err("attempt one must fail")
+                        .to_string()
+                })
+            })
+            .collect::<Vec<_>>();
+        wait_for_metadata_waiters(&opened, 2);
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("build pause lock") = None;
+        build_resume.wait();
+        assert!(builder.join().expect("builder thread").is_err());
+
+        // Both registered waiters have been notified but deliberately dropped
+        // the state lock before consuming attempt one's failure.
+        wake_reached.wait();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .after_wait
+            .lock()
+            .expect("wake pause lock") = None;
+        let retry_started = Arc::new(Barrier::new(2));
+        let retry = {
+            let opened = opened.clone();
+            let retry_started = Arc::clone(&retry_started);
+            thread::spawn(move || {
+                retry_started.wait();
+                opened.retry_metadata()
+            })
+        };
+        retry_started.wait();
+        thread::sleep(Duration::from_millis(10));
+        assert!(!retry.is_finished(), "retry erased an unobserved failure");
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            1
+        );
+
+        wake_resume.wait();
+        let errors = waiters
+            .into_iter()
+            .map(|waiter| waiter.join().expect("waiter"))
+            .collect::<Vec<_>>();
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("injected metadata build failure"))
+        );
+        let metadata = retry.join().expect("retry thread").expect("retry succeeds");
+        assert_eq!((metadata.start_time, metadata.end_time), (0, 25));
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            2
+        );
+    }
+
+    #[test]
+    fn panicking_builder_wakes_registered_waiters_before_retry_recovers() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        opened
+            .inner
+            .metadata
+            .test_hooks
+            .panic_once
+            .store(true, Ordering::SeqCst);
+
+        let (build_pause, build_reached, build_resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("build pause lock") = Some(build_pause);
+        let (wake_pause, wake_reached, wake_resume) = metadata_pause_for(2);
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .after_wait
+            .lock()
+            .expect("wake pause lock") = Some(wake_pause);
+
+        let builder = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata())
+        };
+        build_reached.wait();
+        let waiters = (0..2)
+            .map(|_| {
+                let opened = opened.clone();
+                thread::spawn(move || {
+                    opened
+                        .metadata()
+                        .expect_err("panicked attempt must fail")
+                        .to_string()
+                })
+            })
+            .collect::<Vec<_>>();
+        wait_for_metadata_waiters(&opened, 2);
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("build pause lock") = None;
+        build_resume.wait();
+        assert!(builder.join().is_err(), "injected builder did not panic");
+
+        wake_reached.wait();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .after_wait
+            .lock()
+            .expect("wake pause lock") = None;
+        let retry_started = Arc::new(Barrier::new(2));
+        let retry = {
+            let opened = opened.clone();
+            let retry_started = Arc::clone(&retry_started);
+            thread::spawn(move || {
+                retry_started.wait();
+                opened.retry_metadata()
+            })
+        };
+        retry_started.wait();
+        thread::sleep(Duration::from_millis(10));
+        assert!(
+            !retry.is_finished(),
+            "retry bypassed panicked-attempt waiters"
+        );
+        wake_resume.wait();
+
+        let errors = waiters
+            .into_iter()
+            .map(|waiter| waiter.join().expect("waiter"))
+            .collect::<Vec<_>>();
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("metadata builder panicked"))
+        );
+        let metadata = retry.join().expect("retry thread").expect("retry succeeds");
+        assert_eq!((metadata.start_time, metadata.end_time), (0, 25));
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            2
+        );
+    }
+
+    #[test]
+    fn mutation_before_metadata_publication_is_not_cached() {
+        let (_directory, path) = copy_fixture();
+        let opened = OpenedVcd::open(&path).expect("open");
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .before_validation
+            .lock()
+            .expect("validation pause lock") = Some(pause);
+        let worker = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata())
+        };
+        reached.wait();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("append open")
+            .write_all(b"\n#999\n")
+            .expect("append");
+        resume.wait();
+        assert!(worker.join().expect("worker").is_err());
+        assert!(!opened.has_cached_metadata());
+    }
+
+    #[test]
+    fn replacement_before_metadata_publication_is_not_cached() {
+        let (_directory, path) = copy_fixture();
+        let opened = OpenedVcd::open(&path).expect("open");
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .before_validation
+            .lock()
+            .expect("validation pause lock") = Some(pause);
+        let worker = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata())
+        };
+        reached.wait();
+        let replacement = path.with_extension("metadata-replacement");
+        std::fs::copy(SEMANTICS, &replacement).expect("copy replacement");
+        replace_file(&replacement, &path);
+        resume.wait();
+        assert!(worker.join().expect("worker").is_err());
+        assert!(!opened.has_cached_metadata());
     }
 
     #[test]

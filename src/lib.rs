@@ -320,13 +320,12 @@ impl<R: BufRead> Iterator for TimeValueIter<R> {
     }
 }
 
-pub fn compute_time_bounds<R: BufRead>(parser: Parser<R>) -> Result<(u64, u64)> {
-    let mut iter = parser;
+fn compute_time_bounds_in_place<R: BufRead>(parser: &mut Parser<R>) -> Result<(u64, u64)> {
     let mut current_time: u64 = 0;
     let mut start_time: Option<u64> = None;
     let mut end_time: Option<u64> = None;
 
-    for cmd in &mut iter {
+    for cmd in parser {
         match cmd.map_err(VcdError::from)? {
             Command::Timestamp(t) => {
                 current_time = t;
@@ -347,6 +346,10 @@ pub fn compute_time_bounds<R: BufRead>(parser: Parser<R>) -> Result<(u64, u64)> 
     let start = start_time.unwrap_or(0);
     let end = end_time.unwrap_or(start);
     Ok((start, end))
+}
+
+pub fn compute_time_bounds<R: BufRead>(mut parser: Parser<R>) -> Result<(u64, u64)> {
+    compute_time_bounds_in_place(&mut parser)
 }
 
 pub fn read_vcd_metadata(path: impl AsRef<Path>) -> Result<VcdMeta> {

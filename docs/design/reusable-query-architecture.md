@@ -278,13 +278,13 @@ The default is selected at Gate G7. Until then, `Off` is the safe release defaul
 `OpenedVcd::open` must not compute body bounds. Metadata state is:
 
 ```text
-Absent -> Building -> Ready(VcdMeta)
-                  \-> Failed(error and retry policy)
+Absent -> Building -> Ready(Arc<VcdMeta>)
+                  \-> Failed(cached error; explicit retry)
 ```
 
-A full streaming metadata scan and sidecar construction both compute exact start/end bounds. If either produces metadata for the same generation, it may satisfy the shared state.
+A full streaming metadata scan and sidecar construction both compute exact start/end bounds. If either produces metadata for the same generation, it may satisfy the shared state. `OpenedVcd::metadata` returns an `Arc<VcdMeta>` so clones and concurrent callers share the immutable ready result.
 
-Only one metadata/index builder runs per generation. Waiters can cancel without cancelling a builder they do not own unless policy explicitly allows it.
+Only one metadata/index builder runs per generation. A caller that observes `Building` registers against that attempt before sleeping. Success is immutable and remains reusable. Failure or panic publishes one terminal error plus the number of registered waiters; an explicit retry cannot replace that outcome until those waiters have acknowledged it. This bounded acknowledged-waiter design retains at most one terminal attempt and prevents a racing retry from making a prior waiter observe a newer attempt. A cancellation-safe waiter-registration guard is added with the M2 `QueryContext`; M1 deliberately does not introduce a metadata-specific cancellation API. The M1 builder guard converts panic into the attempt's shared failure and wakes all waiters.
 
 ## 10. File identity and generation semantics
 

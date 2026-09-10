@@ -1,4 +1,5 @@
 use std::io::{Read, Seek};
+use std::sync::Arc;
 
 use vcd_tools_rs::{FingerprintPolicy, OpenOptions, OpenedVcd};
 
@@ -39,6 +40,18 @@ fn public_body_readers_are_independent_and_completion_validated() {
     );
     first.validate_complete().expect("first completion");
     second.validate_complete().expect("second completion");
+}
+
+#[test]
+fn public_metadata_is_lazy_and_reuses_shared_result() {
+    let opened = OpenedVcd::open(SEMANTICS).expect("open VCD");
+    assert!(!opened.has_cached_metadata());
+    let first = opened.metadata().expect("metadata");
+    assert_eq!((first.start_time, first.end_time), (0, 25));
+    assert_eq!(first.signal_count, 7);
+    assert!(opened.has_cached_metadata());
+    let second = opened.metadata().expect("cached metadata");
+    assert!(Arc::ptr_eq(&first, &second));
 }
 
 #[test]

@@ -260,8 +260,8 @@ Exit: Gate G2
 | RQ-M1-T04 | DONE | T01,T03 | Implement `OpenedVcd::open` and accessors |
 | RQ-M1-T05 | DONE | T04 | Implement independent generation-validated readers |
 | RQ-M1-T06 | DONE | T04 | Add borrowed `SignalRef` and owned compatibility conversion |
-| RQ-M1-T07 | READY | T04,T05 | Add lazy metadata single-flight state |
-| RQ-M1-T08 | BLOCKED | T02-T07 | Concurrency, memory, lookup, and compatibility evidence |
+| RQ-M1-T07 | DONE | T04,T05 | Add lazy metadata single-flight state |
+| RQ-M1-T08 | READY | T02-T07 | Concurrency, memory, lookup, and compatibility evidence |
 
 ## RQ-M1-T01 — Identity and options
 
@@ -358,9 +358,10 @@ Acceptance:
 
 - opening/listing does not scan body;
 - concurrent metadata calls run at most one scan;
-- cancellation/panic/failure cannot strand `Building`;
-- waiters are awakened deterministically;
-- exact old metadata semantics preserved.
+- panic/failure cannot strand `Building`, and all waiters are awakened deterministically;
+- immutable ready results and cached failures are shared; explicit retry starts at most one new attempt;
+- exact old metadata semantics preserved;
+- transport-neutral wait cancellation remains assigned to M2 `QueryContext`, avoiding a conflicting metadata-only public API.
 
 ## M1 first-slice evidence (RQ-M1-T01 through T03)
 
@@ -425,7 +426,31 @@ Measured direct reusable access — **preview only, not G2 acceptance**:
 - `OpenedVcd` plus a complete borrowed name pass and lookup measured 0.17–0.18 s and 78,644–79,080 KiB peak RSS versus 0.67–0.68 s and 392,864–393,108 KiB for legacy compatibility materialization.
 - After one open, 100 complete borrowed name passes took 8,067–10,873 µs total and 100,000 lookups took 1,261–1,352 µs total. Output allocation/serialization is intentionally excluded from these catalog-access timings.
 
-Remaining before G2: T07 lazy metadata and T08 final cross-target/concurrency/memory/compatibility review. T08 must capture at least five samples per mode from a clean committed tree with verified input hashes; the current four-sample artifact remains preview evidence. Windows target compilation remains CI/cross-toolchain evidence even though platform-specific identity code is target-gated.
+Remaining before G2: T07 review and T08 final cross-target/concurrency/memory/compatibility review. T08 must capture at least five samples per mode from a clean committed tree with verified input hashes; the current four-sample artifact remains preview evidence. Windows target compilation remains CI/cross-toolchain evidence even though platform-specific identity code is target-gated.
+
+## M1 third-slice evidence (RQ-M1-T07)
+
+Current status: **ACCEPTED**.
+
+Reviewer decision:
+
+- RQ-M1-T07 accepted;
+- laziness, single-flight scanning, completion validation, shared results, attempt-stable failure/retry, panic recovery, waiter acknowledgements, and bounded history verified;
+- report-only test improvement: T08 should replace retry-path timing sleeps with an explicit test hook/counter;
+- G2 remains open for T08.
+
+Implementation evidence:
+
+- `OpenedVcdInner` owns a mutex/condition-variable metadata state machine with monotonic attempt epochs: `Absent -> Building(attempt, registered waiters) -> Ready(Arc<VcdMeta>)` or `Failed(attempt, cached error, pending acknowledgements)`.
+- `OpenedVcd::metadata` performs no body work until first use, returns one shared immutable `Arc<VcdMeta>`, and coalesces concurrent callers behind one scan.
+- Metadata scans use the independent validated body parser, preserve the existing `compute_time_bounds` implementation through an in-place helper, and run completion validation before publishing `Ready`.
+- Every caller that observes `Building` registers against that exact attempt before sleeping. Failure/panic retains one terminal outcome until all registered waiters acknowledge it; `retry_metadata` cannot erase or supersede that outcome and concurrent retries coalesce behind the next attempt. Only one terminal attempt is retained, so history is bounded.
+- The RAII build guard publishes a shared `metadata builder panicked` failure for the active attempt and notifies all waiters during unwinding, so panic cannot strand `Building`.
+- M2 retains ownership of cancellable waits through `QueryContext`; no conflicting metadata-only cancellation surface was introduced. M2 must decrement attempt acknowledgement through a cancellation guard if it allows a registered waiter to leave before consuming an outcome.
+- Deterministic hooks test zero scans at open, sixteen concurrent callers/one scan/shared pointer, cached malformed-body failure, a retry racing two deliberately blocked failed-attempt waiters, a panicked builder with two actual blocked waiters followed by recovery, mutation and atomic replacement immediately before publication, exact empty/no-timestamp/decreasing/body-at-zero semantics, and public lazy/shared behavior.
+- Post-race-fix validation passes: complete serial debug suite 133 passed with 3 release diagnostics ignored; release library 37 passed with 3 ignored; release opened/semantic/CLI suites 39 passed; `cargo check --all-targets`, changed-file formatting, shell syntax, Markdown links, and `git diff --check` pass.
+
+Scope remains T07 only. G2 remains open for T08 clean-tree performance, available cross-target builds, and final gate review.
 
 ## Gate G2 — Core representation and snapshot
 

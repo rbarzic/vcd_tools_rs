@@ -97,9 +97,9 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Implement RQ-M1-T07: lazy metadata single-flight state with deterministic failure/wakeup behavior.
-2. Complete T08: clean five-sample performance evidence, compatibility disposition, concurrency/snapshot proof, and available cross-target checks.
-3. Preserve accepted T01–T06 identity, catalog, `OpenedVcd`, independent-reader, and `SignalRef` behavior.
+1. Complete RQ-M1-T08: clean five-sample performance evidence, compatibility disposition, concurrency/snapshot proof, and available cross-target checks.
+2. Replace the metadata retry-race test's timing sleep with an explicit deterministic retry-wait hook/counter.
+3. Run the final G2 review and record any unavailable platform checks as CI requirements rather than silently omitting them.
 4. Keep socket, sidecar, and cache implementation blocked until the reusable core passes G2/G3.
 
 ## Progress update template

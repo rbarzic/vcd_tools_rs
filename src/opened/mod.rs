@@ -330,7 +330,18 @@ impl MetadataCache {
                     break;
                 }
                 MetadataPhase::Failed { .. } => {
-                    state = self.wait_for_change(state);
+                    #[cfg(test)]
+                    self.test_hooks
+                        .retry_waiters
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    state = self
+                        .changed
+                        .wait(state)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    #[cfg(test)]
+                    self.test_hooks
+                        .retry_waiters
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 _ => {
                     drop(state);
@@ -377,6 +388,7 @@ impl Drop for MetadataBuildGuard<'_> {
 #[derive(Debug)]
 struct MetadataTestHooks {
     scans: std::sync::atomic::AtomicUsize,
+    retry_waiters: std::sync::atomic::AtomicUsize,
     pause: Mutex<Option<MetadataTestPause>>,
     fail_once: std::sync::atomic::AtomicBool,
     panic_once: std::sync::atomic::AtomicBool,
@@ -396,6 +408,7 @@ impl MetadataTestHooks {
     fn new() -> Self {
         Self {
             scans: std::sync::atomic::AtomicUsize::new(0),
+            retry_waiters: std::sync::atomic::AtomicUsize::new(0),
             pause: Mutex::new(None),
             fail_once: std::sync::atomic::AtomicBool::new(false),
             panic_once: std::sync::atomic::AtomicBool::new(false),
@@ -749,7 +762,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Barrier};
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
@@ -803,6 +816,23 @@ mod tests {
             thread::yield_now();
         }
         panic!("metadata waiters did not register");
+    }
+
+    fn wait_for_metadata_retry_waiters(opened: &OpenedVcd, expected: usize) {
+        for _ in 0..100_000 {
+            if opened
+                .inner
+                .metadata
+                .test_hooks
+                .retry_waiters
+                .load(Ordering::SeqCst)
+                == expected
+            {
+                return;
+            }
+            thread::yield_now();
+        }
+        panic!("metadata retry waiters did not block");
     }
 
     fn replace_file(replacement: &Path, destination: &Path) {
@@ -1281,8 +1311,7 @@ mod tests {
             })
         };
         retry_started.wait();
-        thread::sleep(Duration::from_millis(10));
-        assert!(!retry.is_finished(), "retry erased an unobserved failure");
+        wait_for_metadata_retry_waiters(&opened, 1);
         assert_eq!(
             opened
                 .inner
@@ -1388,11 +1417,7 @@ mod tests {
             })
         };
         retry_started.wait();
-        thread::sleep(Duration::from_millis(10));
-        assert!(
-            !retry.is_finished(),
-            "retry bypassed panicked-attempt waiters"
-        );
+        wait_for_metadata_retry_waiters(&opened, 1);
         wake_resume.wait();
 
         let errors = waiters

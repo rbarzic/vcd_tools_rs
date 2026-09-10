@@ -292,7 +292,8 @@ Only one metadata/index builder runs per generation. A caller that observes `Bui
 
 - file length;
 - nanosecond-resolution modification time;
-- Unix device and inode, or Windows volume serial number and file index;
+- Unix device and inode where stable `std` APIs expose them;
+- on Windows and other targets without a stable standard-library file ID, metadata plus complete-header and bounded-content fingerprints (native file-ID support may be added later without changing public identity);
 - parsed body offset;
 - BLAKE3 of the complete header;
 - a default bounded fingerprint of the first and last 64 KiB;

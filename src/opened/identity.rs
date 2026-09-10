@@ -7,8 +7,6 @@ use crate::Result;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt as UnixMetadataExt;
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt as WindowsMetadataExt;
 
 const CONTENT_SAMPLE_BYTES: u64 = 64 * 1024;
 #[allow(dead_code)] // Allocated by `OpenedVcd::open` in RQ-M1-T04.
@@ -106,10 +104,6 @@ pub struct FileIdentity {
     device: u64,
     #[cfg(unix)]
     inode: u64,
-    #[cfg(windows)]
-    volume_serial_number: Option<u32>,
-    #[cfg(windows)]
-    file_index: Option<u64>,
 }
 
 impl FileIdentity {
@@ -149,16 +143,6 @@ impl FileIdentity {
     #[cfg(unix)]
     pub fn inode(&self) -> u64 {
         self.inode
-    }
-
-    #[cfg(windows)]
-    pub fn volume_serial_number(&self) -> Option<u32> {
-        self.volume_serial_number
-    }
-
-    #[cfg(windows)]
-    pub fn file_index(&self) -> Option<u64> {
-        self.file_index
     }
 
     pub(crate) fn matches_metadata(&self, metadata: &Metadata) -> bool {
@@ -286,10 +270,6 @@ impl FileIdentity {
             device: UnixMetadataExt::dev(metadata),
             #[cfg(unix)]
             inode: UnixMetadataExt::ino(metadata),
-            #[cfg(windows)]
-            volume_serial_number: WindowsMetadataExt::volume_serial_number(metadata),
-            #[cfg(windows)]
-            file_index: WindowsMetadataExt::file_index(metadata),
         }
     }
 }
@@ -300,14 +280,12 @@ fn matches_stored_platform_identity(identity: &FileIdentity, metadata: &Metadata
         && identity.inode == UnixMetadataExt::ino(metadata)
 }
 
-#[cfg(windows)]
-fn matches_stored_platform_identity(identity: &FileIdentity, metadata: &Metadata) -> bool {
-    identity.volume_serial_number == WindowsMetadataExt::volume_serial_number(metadata)
-        && identity.file_index == WindowsMetadataExt::file_index(metadata)
-}
-
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(unix))]
 fn matches_stored_platform_identity(_identity: &FileIdentity, _metadata: &Metadata) -> bool {
+    // Stable std exposes device/inode identity on Unix. On other targets the
+    // generation remains bound by metadata plus complete-header and content
+    // sample fingerprints; stronger native file IDs can be added later without
+    // changing the public identity shape.
     true
 }
 
@@ -317,14 +295,7 @@ fn same_platform_identity(before: &Metadata, after: &Metadata) -> bool {
         && UnixMetadataExt::ino(before) == UnixMetadataExt::ino(after)
 }
 
-#[cfg(windows)]
-fn same_platform_identity(before: &Metadata, after: &Metadata) -> bool {
-    WindowsMetadataExt::volume_serial_number(before)
-        == WindowsMetadataExt::volume_serial_number(after)
-        && WindowsMetadataExt::file_index(before) == WindowsMetadataExt::file_index(after)
-}
-
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(unix))]
 fn same_platform_identity(_before: &Metadata, _after: &Metadata) -> bool {
     true
 }

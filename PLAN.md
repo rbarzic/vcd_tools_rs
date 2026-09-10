@@ -97,9 +97,9 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Complete RQ-M1-T08: clean five-sample performance evidence, compatibility disposition, concurrency/snapshot proof, and available cross-target checks.
-2. Replace the metadata retry-race test's timing sleep with an explicit deterministic retry-wait hook/counter.
-3. Run the final G2 review and record any unavailable platform checks as CI requirements rather than silently omitting them.
+1. Commit the reviewed T08 portability and deterministic-test changes.
+2. From that clean commit, capture five compact/opened/compatibility samples and five path-list samples for VCD-A using the exact commands in the implementation plan.
+3. Store only verified TSV evidence, summarize the compatibility disposition, and run final G2 review.
 4. Keep socket, sidecar, and cache implementation blocked until the reusable core passes G2/G3.
 
 ## Progress update template

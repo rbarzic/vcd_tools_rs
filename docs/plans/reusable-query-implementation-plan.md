@@ -261,7 +261,7 @@ Exit: Gate G2
 | RQ-M1-T05 | DONE | T04 | Implement independent generation-validated readers |
 | RQ-M1-T06 | DONE | T04 | Add borrowed `SignalRef` and owned compatibility conversion |
 | RQ-M1-T07 | DONE | T04,T05 | Add lazy metadata single-flight state |
-| RQ-M1-T08 | READY | T02-T07 | Concurrency, memory, lookup, and compatibility evidence |
+| RQ-M1-T08 | IN_REVIEW | T02-T07 | Concurrency, memory, lookup, and compatibility evidence |
 
 ## RQ-M1-T01 — Identity and options
 
@@ -376,7 +376,7 @@ Reviewer decision:
 
 Implementation evidence:
 
-- `src/opened/identity.rs` adds opaque, handle-derived `FileIdentity`, target-gated Unix device/inode and Windows volume/file-index foundations, process-local `GenerationId`, and BLAKE3 header/content fingerprints. Default identity work hashes the complete header plus bounded 64 KiB beginning/end samples; strict full-content hashing is explicit and opt-in.
+- `src/opened/identity.rs` adds opaque, handle-derived `FileIdentity`, target-gated Unix device/inode evidence, process-local `GenerationId`, and BLAKE3 header/content fingerprints. Windows stable `std` does not expose a non-experimental by-handle file ID, so that target is bound by metadata plus complete-header and content fingerprints; native file-ID support remains additive. Default identity work hashes the complete header plus bounded 64 KiB beginning/end samples; strict full-content hashing is explicit and opt-in.
 - `OpenOptions` has private fields, is `#[non_exhaustive]`, and exposes constructor/builder/accessor methods so later sidecar/cache options can be additive. `FingerprintPolicy` is also non-exhaustive.
 - `FileIdentity` construction is crate-private. `src/header.rs` provides the provenance-safe seam that reads the header, computes body offset, samples/hashes, and restores cursor position using the same opened handle.
 - `src/catalog.rs` stores declaration-order `SignalMeta` records, one shared full-name allocation, numeric `SignalKey` alias lists, and a parent-linked scope arena. Checked `u32` capacity failure maps through the existing `VcdError::Parse` boundary; no public error variant was added.
@@ -426,7 +426,7 @@ Measured direct reusable access — **preview only, not G2 acceptance**:
 - `OpenedVcd` plus a complete borrowed name pass and lookup measured 0.17–0.18 s and 78,644–79,080 KiB peak RSS versus 0.67–0.68 s and 392,864–393,108 KiB for legacy compatibility materialization.
 - After one open, 100 complete borrowed name passes took 8,067–10,873 µs total and 100,000 lookups took 1,261–1,352 µs total. Output allocation/serialization is intentionally excluded from these catalog-access timings.
 
-Remaining before G2: T07 review and T08 final cross-target/concurrency/memory/compatibility review. T08 must capture at least five samples per mode from a clean committed tree with verified input hashes; the current four-sample artifact remains preview evidence. Windows target compilation remains CI/cross-toolchain evidence even though platform-specific identity code is target-gated.
+Remaining before G2: T07 review and T08 final cross-target/concurrency/memory/compatibility review. T08 must capture at least five samples per mode from a clean committed tree with verified input hashes; the current four-sample artifact remains preview evidence. Installed-target `cargo check --lib` covers target-gated source; native CI remains responsible for release linking and Windows native file-handle behavior.
 
 ## M1 third-slice evidence (RQ-M1-T07)
 
@@ -452,6 +452,53 @@ Implementation evidence:
 
 Scope remains T07 only. G2 remains open for T08 clean-tree performance, available cross-target builds, and final gate review.
 
+## M1 final-gate evidence preparation (RQ-M1-T08)
+
+Current status: **IN REVIEW / CLEAN BENCHMARKS PENDING**.
+
+Completed evidence:
+
+- The two metadata retry race tests no longer depend on `sleep` or `JoinHandle::is_finished`. A test-only retry-waiter counter records the exact condition-variable wait; both failure and panic tests wait for that state before releasing registered attempt waiters. Production synchronization is unchanged. Both tests also passed 20 consecutive focused repetitions.
+- BLAKE3 uses its `pure` feature so target checking does not require a target-native assembler. This selects the crate's portable implementation without changing BLAKE3 digest semantics or the persisted in-memory fingerprint shape.
+- `cargo check --lib` passes for the host and all four installed release targets: `x86_64-pc-windows-msvc`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, and `aarch64-apple-darwin`. These are preliminary source/type checks; T08 must rerun `cargo check --all-targets` from the clean candidate commit. Per CR-002, native release linking/archive construction remains a G8/release-CI responsibility. Commands and portability findings are durably recorded in `docs/benchmarks/artifacts/m1/target-checks.md`.
+- The Windows target exposed that `MetadataExt::volume_serial_number` and `file_index` are still unstable on the pinned stable toolchain. The implementation now uses Unix device/inode only where stable `std` exposes them. Windows and other targets use file length/mtime plus complete-header and bounded-content fingerprints; stronger native file IDs remain an additive hardening option.
+- Complete serial debug and release suites each pass 133 non-ignored Rust tests with 3 diagnostics ignored. Three Python console tests pass. `cargo doc --no-deps`, changed-file `rustfmt --check`, shell syntax, and `git diff --check` pass. Project-wide `cargo fmt --all -- --check` still reports only the accepted pre-existing formatting drift in untouched legacy files documented at G1; T08 does not widen scope to reformat them.
+- Concurrency/snapshot evidence from T04–T07 covers eight concurrent independent parsers, one metadata scan across sixteen concurrent callers, immutable shared results, configured-symlink retargeting, atomic replacement, append/truncate/in-place mutation, complete-header mutation outside bounded samples, and pre-publication validation.
+- Compatibility behavior remains protected by the accepted M0 semantic, CLI, Python-console, and integration suites. The reusable list path avoids legacy `SignalIndex` materialization; final clean-tree path-list measurements remain required to disposition the previous cold compatibility latency regression.
+
+Remaining before G2:
+
+1. Commit the T08 code/test portability changes so the benchmark revision is identifiable and the tree can be clean.
+2. From that clean commit, rerun `cargo check --all-targets` for the host and four installed release targets, recording the exact commit/results per CR-002.
+3. Capture at least five alternating compact/opened/compatibility samples and five path-list samples for VCD-A with expected input/output hashes.
+4. Store those records separately under `docs/benchmarks/artifacts/m1/`; do not relabel dirty preview evidence.
+5. Run final fresh-context G2 review over the committed code and clean evidence.
+
+Exact clean-tree commands for the supervisor:
+
+```sh
+test -z "$(git status --porcelain)"
+A=/home/roba/work/gitlab/icdesign/chips/polaris-hw/sim/ctests/cp1_cp2_payload_006/tb.vcd
+A_SHA=8b5a3791ad8d4232e637fd16edba9618cd0370eb66d3d7e1d780f82531c8f4ac
+mkdir -p /tmp/vcd-tools-t08
+CATALOG_EVIDENCE_STATUS=g2_candidate \
+CATALOG_RUNS=5 scripts/measure-catalog-memory.sh "$A" \
+  > /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
+grep -F $'evidence_status\tg2_candidate' /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
+grep -F $'git_dirty\tfalse' /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
+grep -F $'vcd_sha256\t'"$A_SHA" /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
+
+cargo build --release
+BENCH_RUNS=5 \
+BENCH_ARTIFACT_DIR=/tmp/vcd-tools-t08/path-list \
+BENCH_LABEL=path-list-A-clean \
+BENCH_EXPECT_VCD_SHA256="$A_SHA" \
+BENCH_EXPECT_SHA256=903dd62e7781c84e249b3c304aa6821a9edbf7a18509e88ef63f39ee5a56be7a \
+scripts/bench-vcd.sh "$A" list --filter cache_clk
+```
+
+The supervisor should verify all five statuses/hashes, then copy only the TSV records (not large stdout files) into the repository and summarize medians/ranges in `docs/benchmarks/reusable-query-baseline.md`.
+
 ## Gate G2 — Core representation and snapshot
 
 Pass when:
@@ -461,7 +508,7 @@ Pass when:
 - provisional 40% memory-reduction target passes or is explicitly revised;
 - independent-reader/snapshot tests pass;
 - `OpenedVcd` has no shared parser mutex;
-- all current targets compile.
+- all current release targets pass `cargo check --all-targets` from the candidate commit; native release linking, archives, and runtime platform behavior remain G8/release-CI evidence per CR-002.
 
 ---
 
@@ -1057,6 +1104,21 @@ Follow [`../benchmarks/reusable-query-baseline.md`](../benchmarks/reusable-query
 | Peak-memory implication | The complete parser header necessarily exists initially, but processed tree nodes are not retained through a borrowed second representation; actual compact-only peak RSS, not an ownership estimate alone, remains the G2 evidence |
 | Compatibility impact | None; public `Signal`, `SignalIndex`, and path APIs retain their accepted M0 behavior |
 | Rollback | Revert the compact parser/catalog modules and restore the M0 header implementation |
+| Status | `APPROVED` |
+
+## CR-002 — Define G2 portability as all-target source/type compatibility
+
+| Field | Record |
+|---|---|
+| Change ID | `CR-002` |
+| Owner/approval | Supervising implementation authority; approved after T08 portability review |
+| Affected tasks | `RQ-M1-T08`, Gate G2, Gate G8 |
+| Old requirement | “All current targets compile,” which could be read as requiring native linking/archive builds for every release platform at G2 |
+| Constraint | The development host can install Rust standard libraries and run `cargo check`, but cannot natively link MSVC/macOS binaries or reproduce the release runners/cross toolchains |
+| Approved replacement | G2 requires `cargo check --all-targets` for the host and every installed release target from the clean candidate commit. Native/cross release linking, archive construction, wheel checks, and platform runtime semantics remain mandatory at G8 in the existing release CI matrix |
+| Evidence | `docs/benchmarks/artifacts/m1/target-checks.md` plus final T08 clean-commit checks |
+| Compatibility impact | None; this changes gate timing/evidence, not supported targets or production behavior |
+| Rollback | Restore native link requirement to G2 and keep M2 blocked until release-runner evidence exists |
 | Status | `APPROVED` |
 
 Future changes must append another record using this template:

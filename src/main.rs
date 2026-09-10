@@ -6,10 +6,10 @@ use clap::{ArgAction, Parser, Subcommand};
 use log::LevelFilter;
 
 use vcd_tools_rs::{
-    TimeValue, TimeWindow, VcdError, build_sizes, build_target_map, find_nth_occurrence,
-    format_value_for_signal, list_signals, load_signal_list, parse_target_value, read_signals,
-    read_signals_with_offset, read_vcd_metadata,
-    compare_vcd_files, ComparisonOptions, count_toggles,
+    ComparisonOptions, TimeValue, TimeWindow, VcdError, build_sizes, build_target_map,
+    compare_vcd_files, count_toggles, find_nth_occurrence, format_value_for_signal,
+    list_signals_from_file, load_signal_list, parse_target_value, read_signals_with_offset,
+    read_vcd_metadata,
 };
 
 #[derive(Parser, Debug)]
@@ -291,8 +291,7 @@ where
 }
 
 fn handle_list(vcd: &Path, filter: Option<String>, pretty: bool) -> Result<()> {
-    let (signals, _index, _timescale) = read_signals(vcd)?;
-    let names = list_signals(&signals, filter.as_deref());
+    let names = list_signals_from_file(vcd, filter.as_deref())?;
     print_signal_list(&names, pretty);
     Ok(())
 }

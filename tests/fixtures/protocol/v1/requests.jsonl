@@ -1,0 +1,8 @@
+{"v":1,"id":"ping-1","method":"ping","params":{}}
+{"v":1,"id":"describe-1","method":"describe","params":{}}
+{"v":1,"id":"list-1","method":"list","params":{"filter":"clk","max_response_bytes":"16777216","max_rows":"10000","timeout_ms":"30000"}}
+{"v":1,"id":"meta-1","method":"metadata","params":{"max_commands":"10000000","timeout_ms":"30000"}}
+{"v":1,"id":"extract-1","method":"extract","params":{"end":"1000","max_commands":"10000000","max_response_bytes":"16777216","max_rows":"100000","signals":["tb.clk","tb.clk"],"start":"0","timeout_ms":"30000"}}
+{"v":1,"id":"find-1","method":"find","params":{"end":"1000","max_commands":"10000000","max_response_bytes":"16777216","occurrence":"2","signal":"tb.done","start":"0","timeout_ms":"30000","value":"1"}}
+{"v":1,"id":"toggle-1","method":"toggles","params":{"end":"1000","max_commands":"10000000","max_response_bytes":"16777216","signals":["tb.clk","tb.enable"],"start":"0","timeout_ms":"30000"}}
+{"v":1,"id":"cancel-1","method":"cancel","params":{"request_id":"extract-1"}}

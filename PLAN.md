@@ -97,8 +97,8 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Begin M4 with protocol types, strict decoder/encoder, and golden JSONL fixtures before socket integration.
-2. Implement the Unix listener and bounded scheduler only after protocol golden tests pass.
+1. Batch M4 T02–T05: safe Unix listener, bounded scheduler/registry, connection backpressure, and cancellation/disconnect handling.
+2. Use the accepted protocol module directly; do not duplicate frame or request validation in listener code.
 3. Keep sidecar production work in M5/G6 and selective cache production work in M6/G7.
 4. Preserve native-only server distribution and do not advertise compare/cache/shutdown methods in protocol v1.
 

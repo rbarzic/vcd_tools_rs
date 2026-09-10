@@ -1,0 +1,13 @@
+[
+  {"name":"malformed","line":"{\"v\":1"},
+  {"name":"duplicate_envelope_key","line":"{\"v\":1,\"v\":1,\"id\":\"x\",\"method\":\"ping\",\"params\":{}}"},
+  {"name":"duplicate_nested_key","line":"{\"v\":1,\"id\":\"x\",\"method\":\"find\",\"params\":{\"signal\":\"a\",\"signal\":\"b\",\"value\":\"1\"}}"},
+  {"name":"unknown_param","line":"{\"v\":1,\"id\":\"x\",\"method\":\"ping\",\"params\":{\"typo\":true}}"},
+  {"name":"unsupported_version","line":"{\"v\":2,\"id\":\"x\",\"method\":\"ping\",\"params\":{}}"},
+  {"name":"leading_zero","line":"{\"v\":1,\"id\":\"x\",\"method\":\"metadata\",\"params\":{\"max_commands\":\"01\"}}"},
+  {"name":"u64_overflow","line":"{\"v\":1,\"id\":\"x\",\"method\":\"metadata\",\"params\":{\"max_commands\":\"18446744073709551616\"}}"},
+  {"name":"invalid_window","line":"{\"v\":1,\"id\":\"x\",\"method\":\"extract\",\"params\":{\"signals\":[\"a\"],\"start\":\"2\",\"end\":\"1\"}}"},
+  {"name":"zero_occurrence","line":"{\"v\":1,\"id\":\"x\",\"method\":\"find\",\"params\":{\"signal\":\"a\",\"value\":\"1\",\"occurrence\":\"0\"}}"},
+  {"name":"too_small_response","line":"{\"v\":1,\"id\":\"x\",\"method\":\"extract\",\"params\":{\"signals\":[\"a\"],\"max_response_bytes\":\"4095\"}}"},
+  {"name":"oversize_unterminated","repeat":"x","count":1048576}
+]

@@ -1,0 +1,15 @@
+{"v":1,"id":"e-bad-request","seq":0,"type":"error","ok":false,"error":{"code":"BAD_REQUEST","message":"invalid request","details":{},"retryable":false}}
+{"v":1,"id":"e-unsupported-version","seq":0,"type":"error","ok":false,"error":{"code":"UNSUPPORTED_VERSION","message":"unsupported protocol version","details":{"supported_versions":["1"]},"retryable":false}}
+{"v":1,"id":"e-unknown-method","seq":0,"type":"error","ok":false,"error":{"code":"UNKNOWN_METHOD","message":"unknown method","details":{"method":"future"},"retryable":false}}
+{"v":1,"id":"e-duplicate-request-id","seq":0,"type":"error","ok":false,"error":{"code":"DUPLICATE_REQUEST_ID","message":"request ID is already active","details":{"id":"x"},"retryable":false}}
+{"v":1,"id":"e-signal-not-found","seq":0,"type":"error","ok":false,"error":{"code":"SIGNAL_NOT_FOUND","message":"one or more signals were not found","details":{"signals":["tb.missing"]},"retryable":false}}
+{"v":1,"id":"e-invalid-window","seq":0,"type":"error","ok":false,"error":{"code":"INVALID_WINDOW","message":"start must be less than or equal to end","details":{},"retryable":false}}
+{"v":1,"id":"e-invalid-occurrence","seq":0,"type":"error","ok":false,"error":{"code":"INVALID_OCCURRENCE","message":"occurrence must be >= 1","details":{},"retryable":false}}
+{"v":1,"id":"e-limit-exceeded","seq":0,"type":"error","ok":false,"error":{"code":"LIMIT_EXCEEDED","message":"query limit exceeded","details":{"actual":"2","kind":"rows","limit":"1"},"retryable":false}}
+{"v":1,"id":"e-queue-full","seq":0,"type":"error","ok":false,"error":{"code":"QUEUE_FULL","message":"query queue is full","details":{},"retryable":true}}
+{"v":1,"id":"e-cancelled","seq":0,"type":"error","ok":false,"error":{"code":"CANCELLED","message":"query cancelled","details":{},"retryable":false}}
+{"v":1,"id":"e-deadline-exceeded","seq":0,"type":"error","ok":false,"error":{"code":"DEADLINE_EXCEEDED","message":"query deadline exceeded","details":{},"retryable":true}}
+{"v":1,"id":"e-stale-source","seq":0,"type":"error","ok":false,"error":{"code":"STALE_SOURCE","message":"source changed during query","details":{},"retryable":true}}
+{"v":1,"id":"e-source-unavailable","seq":0,"type":"error","ok":false,"error":{"code":"SOURCE_UNAVAILABLE","message":"source unavailable","details":{},"retryable":true}}
+{"v":1,"id":"e-parse-error","seq":0,"type":"error","ok":false,"error":{"code":"PARSE_ERROR","message":"VCD parse error","details":{},"retryable":false}}
+{"v":1,"id":"e-internal","seq":0,"type":"error","ok":false,"error":{"code":"INTERNAL","message":"internal server error","details":{},"retryable":false}}

@@ -813,9 +813,9 @@ Exit: Gate G5
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M4-T01 | READY | G4 | Protocol types/decoder/encoder and golden tests |
-| RQ-M4-T02 | BLOCKED | T01 | Safe listener lifecycle and permissions |
-| RQ-M4-T03 | BLOCKED | T01 | Bounded scheduler and request registry |
+| RQ-M4-T01 | DONE | G4 | Protocol types/decoder/encoder and golden tests |
+| RQ-M4-T02 | READY | T01 | Safe listener lifecycle and permissions |
+| RQ-M4-T03 | READY | T01 | Bounded scheduler and request registry |
 | RQ-M4-T04 | BLOCKED | T02,T03 | Connection reader/writer and backpressure |
 | RQ-M4-T05 | BLOCKED | T03,T04 | Cancellation/deadline/disconnect handling |
 | RQ-M4-T06 | BLOCKED | T01,T05 | `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles` |
@@ -825,6 +825,25 @@ Exit: Gate G5
 | RQ-M4-T10 | BLOCKED | T08,T09 | Load, soak, leak, security, and portability evidence |
 
 ## RQ-M4-T01 — Protocol implementation
+
+Status: **ACCEPTED**.
+
+Implementation evidence:
+
+- target-neutral `server::protocol` module with no socket/platform dependency;
+- bounded incremental UTF-8 JSONL accumulator enforcing the 1 MiB line cap before unbounded growth;
+- recursive strict JSON decoding with duplicate-key rejection, strict envelopes and method params, canonical checked decimal strings, request-ID and active-ID validation seams;
+- exact request types for all eight v1 methods and exact response/capability/value/timescale/stats/error frames;
+- frozen QueryError/VcdError mapping with redacted source/internal messages;
+- encoded-byte accounting includes the terminating newline;
+- checked-in request, response, error, malformed, duplicate, overflow, invalid-window, and generated oversize golden cases under `tests/fixtures/protocol/v1`;
+- focused protocol tests cover exact round trips, both streaming schemas, every value and error variant, legal complete/incomplete per-ID lifecycles, stabilized authoritative cumulative JSONL byte statistics, accumulator bounds, and parser failures;
+- complete debug and release suites each passed 188 tests with 4 diagnostics ignored; after the golden-lifecycle corrections, the focused protocol suite passed 15 tests; documentation builds;
+- full command/result evidence is recorded in `docs/benchmarks/artifacts/m4/protocol-validation.md`;
+- `cargo check --all-targets` passes for Linux x64, Windows x64 MSVC, Linux ARM64, macOS Intel, and macOS ARM64;
+- changed protocol files pass `rustfmt --check`, shell/diff checks are clean; project-wide clippy remains blocked only by the pre-existing accepted legacy lints recorded at G1.
+
+T02 handoff: listener code consumes `JsonLineAccumulator`, calls `decode_request_with_active`, and sends only `ResponseFrame` values through `encode_json_line`. It must not reimplement protocol validation.
 
 Expected files:
 

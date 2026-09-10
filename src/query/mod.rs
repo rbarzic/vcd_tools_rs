@@ -1,4 +1,9 @@
+mod compare;
+mod extract;
+mod ops;
 pub(crate) mod stream;
+
+pub use extract::{OpenedTimeValueIter, logical_event_bytes};
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -195,6 +200,18 @@ impl From<VcdError> for QueryError {
 }
 
 pub type QueryResult<T> = std::result::Result<T, QueryError>;
+
+pub(crate) fn into_vcd_error(error: QueryError) -> VcdError {
+    match error {
+        QueryError::StaleSource(error) | QueryError::Vcd(error) => error,
+        QueryError::SourceUnavailable(error) => VcdError::Io(error),
+        QueryError::Cancelled => VcdError::Parse("query cancelled".to_string()),
+        QueryError::DeadlineExceeded => VcdError::Parse("query deadline exceeded".to_string()),
+        QueryError::LimitExceeded { .. } | QueryError::QueueFull | QueryError::Internal(_) => {
+            VcdError::Parse(error.to_string())
+        }
+    }
+}
 
 /// Optional finite budgets applied by reusable query APIs.
 #[derive(Debug, Clone, Default)]

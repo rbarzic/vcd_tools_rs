@@ -225,6 +225,8 @@ Cancellation/deadline checks occur:
 - before result/chunk delivery;
 - while waiting for metadata, cache, sidecar, scheduler, or output capacity.
 
+For reusable extraction, `max_result_bytes` uses a transport-neutral logical event size: UTF-8 signal-name bytes + 8 timestamp bytes + 16 bytes for `u128`, 8 bytes for `f64`, or UTF-8 bytes for text. The iterator checks cancellation, row count, and cumulative logical bytes before each emitted alias/request row. This is not serialized JSON/socket size; every transport must separately enforce actual encoded bytes and bounded output queues.
+
 ## 8. Query backends
 
 ### 8.1 Streaming backend — required

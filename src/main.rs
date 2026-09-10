@@ -5,11 +5,11 @@ use anyhow::{Result, bail};
 use clap::{ArgAction, Parser, Subcommand};
 use log::LevelFilter;
 
+use vcd_tools_rs::opened::OpenedVcd;
+use vcd_tools_rs::query::QueryContext;
 use vcd_tools_rs::{
-    ComparisonOptions, TimeValue, TimeWindow, VcdError, build_sizes, build_target_map,
-    compare_vcd_files, count_toggles, find_nth_occurrence, format_value_for_signal,
-    list_signals_from_file, load_signal_list, parse_target_value, read_signals_with_offset,
-    read_vcd_metadata,
+    ComparisonOptions, TimeValue, TimeWindow, format_value_for_signal, load_signal_list,
+    parse_target_value,
 };
 
 #[derive(Parser, Debug)]
@@ -223,14 +223,15 @@ fn print_metadata(meta: &vcd_tools_rs::VcdMeta, pretty: bool) {
     }
 }
 
-fn emit_time_aligned<I>(
+fn emit_time_aligned<I, E>(
     events: I,
     signal_order: &[String],
     sizes: &HashMap<String, u32>,
     pretty: bool,
 ) -> Result<()>
 where
-    I: IntoIterator<Item = Result<TimeValue, VcdError>>,
+    I: IntoIterator<Item = std::result::Result<TimeValue, E>>,
+    E: Into<anyhow::Error>,
 {
     let headers: Vec<String> = std::iter::once("time".to_string())
         .chain(signal_order.iter().cloned())
@@ -261,7 +262,7 @@ where
         };
 
     for evt in events {
-        let evt = evt?;
+        let evt = evt.map_err(Into::into)?;
         if current_time.is_none() {
             current_time = Some(evt.time);
         }
@@ -291,13 +292,15 @@ where
 }
 
 fn handle_list(vcd: &Path, filter: Option<String>, pretty: bool) -> Result<()> {
-    let names = list_signals_from_file(vcd, filter.as_deref())?;
+    let opened = OpenedVcd::open(vcd)?;
+    let names = opened.list_signals(filter.as_deref());
     print_signal_list(&names, pretty);
     Ok(())
 }
 
 fn handle_meta(vcd: &Path, pretty: bool) -> Result<()> {
-    let meta = read_vcd_metadata(vcd)?;
+    let opened = OpenedVcd::open(vcd)?;
+    let meta = opened.metadata()?;
     print_metadata(&meta, pretty);
     Ok(())
 }
@@ -310,14 +313,20 @@ fn handle_extract(
     pretty: bool,
 ) -> Result<()> {
     let names = collect_signal_names(&signals, signals_file.as_deref())?;
-    let (all_signals, index, _timescale, offset) = read_signals_with_offset(vcd)?;
-    let (target_map, missing) = build_target_map(&index, &names);
+    let opened = OpenedVcd::open(vcd)?;
+    let missing = names
+        .iter()
+        .filter(|name| opened.signal(name).is_none())
+        .cloned()
+        .collect::<Vec<_>>();
     if !missing.is_empty() {
         bail!("Signals not found in VCD: {}", missing.join(", "));
     }
-
-    let sizes = build_sizes(&all_signals);
-    let iter = vcd_tools_rs::time_value_iter_from_body(vcd, target_map, window, offset)?;
+    let sizes = names
+        .iter()
+        .filter_map(|name| opened.signal(name).map(|signal| (name.clone(), signal.size())))
+        .collect::<HashMap<_, _>>();
+    let iter = opened.extract(&names, window, &QueryContext::legacy_unlimited())?;
     emit_time_aligned(iter, &names, &sizes, pretty)?;
     Ok(())
 }
@@ -330,7 +339,12 @@ fn handle_toggle(
     pretty: bool,
 ) -> Result<()> {
     let names = collect_signal_names(&signals, signals_file.as_deref())?;
-    let toggle_counts = count_toggles(vcd, &names, window)?;
+    let opened = OpenedVcd::open(vcd)?;
+    let toggle_counts = opened.count_toggles(
+        &names,
+        window,
+        &QueryContext::legacy_unlimited(),
+    )?;
 
     let headers = vec!["signal", "toggles"];
     let rows: Vec<Vec<String>> = names.iter().map(|n| {
@@ -362,7 +376,14 @@ fn handle_find(
     }
 
     let parsed_value = parse_target_value(&value);
-    let (event, size_bits) = find_nth_occurrence(vcd, &signal, parsed_value, occurrence, window)?;
+    let opened = OpenedVcd::open(vcd)?;
+    let (event, size_bits) = opened.find_nth_occurrence(
+        &signal,
+        parsed_value,
+        occurrence,
+        window,
+        &QueryContext::legacy_unlimited(),
+    )?;
     let event = match event {
         Some(e) => e,
         None => bail!("No matching occurrence found in the specified window."),
@@ -443,10 +464,12 @@ fn main() -> Result<()> {
                 time_window: TimeWindow { start, end },
             };
 
-            let result = compare_vcd_files(
-                reference.to_str().unwrap_or("reference.vcd"),
-                actual.to_str().unwrap_or("actual.vcd"),
+            let reference = OpenedVcd::open(&reference)?;
+            let actual = OpenedVcd::open(&actual)?;
+            let result = reference.compare(
+                &actual,
                 &options,
+                &QueryContext::legacy_unlimited(),
             )?;
 
             handle_compare(&result, output.as_deref())

@@ -8,7 +8,7 @@ pub use opened::{
     OpenOptions, OpenedBodyReader, OpenedVcd, SignalRef,
 };
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
@@ -354,19 +354,10 @@ pub fn compute_time_bounds<R: BufRead>(mut parser: Parser<R>) -> Result<(u64, u6
 }
 
 pub fn read_vcd_metadata(path: impl AsRef<Path>) -> Result<VcdMeta> {
-    let path = path.as_ref();
-    let (signals, _index, timescale, offset) = read_signals_with_offset(path)?;
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(offset))?;
-    let reader = BufReader::new(file);
-    let parser = Parser::new(reader);
-    let (start, end) = compute_time_bounds(parser)?;
-    Ok(VcdMeta {
-        timescale,
-        signal_count: signals.len(),
-        start_time: start,
-        end_time: end,
-    })
+    let opened = opened::OpenedVcd::open(path)?;
+    opened
+        .metadata()
+        .map(|metadata| metadata.as_ref().clone())
 }
 
 pub fn build_target_map(
@@ -393,20 +384,12 @@ pub fn extract_time_values_from_file(
     targets: &[String],
     window: TimeWindow,
 ) -> Result<Vec<TimeValue>> {
-    let path = path.as_ref();
-    let (_signals, index, _timescale, offset) = read_signals_with_offset(path)?;
-    let (target_map, missing) = build_target_map(&index, targets);
-    if !missing.is_empty() {
-        let list = missing.join(", ");
-        return Err(VcdError::MissingSignals(list));
-    }
-
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(offset))?;
-    let reader = BufReader::new(file);
-    let parser = Parser::new(reader);
-    let iter = TimeValueIter::new(parser, target_map, window);
-    iter.collect()
+    let opened = opened::OpenedVcd::open(path)?;
+    opened
+        .extract(targets, window, &query::QueryContext::legacy_unlimited())
+        .map_err(query::into_vcd_error)?
+        .collect::<query::QueryResult<Vec<_>>>()
+        .map_err(query::into_vcd_error)
 }
 
 pub fn find_nth_occurrence(
@@ -416,39 +399,16 @@ pub fn find_nth_occurrence(
     occurrence: usize,
     window: TimeWindow,
 ) -> Result<(Option<TimeValue>, u32)> {
-    if occurrence < 1 {
-        return Err(VcdError::InvalidOccurrence);
-    }
-
-    let path_ref = path.as_ref();
-    let (signals, index, _timescale, offset) = read_signals_with_offset(path_ref)?;
-    let size_map: HashMap<String, u32> = signals.iter().map(|s| (s.name.clone(), s.size)).collect();
-    let (target_map, missing) = build_target_map(&index, &[signal.to_string()]);
-    if !missing.is_empty() {
-        return Err(VcdError::MissingSignal(missing[0].clone()));
-    }
-
-    let mut file = File::open(path_ref)?;
-    file.seek(SeekFrom::Start(offset))?;
-    let reader = BufReader::new(file);
-    let parser = Parser::new(reader);
-    let iter = TimeValueIter::new(parser, target_map, window);
-
-    let normalized_target = target_value.normalize();
-    let mut count = 0usize;
-    for evt in iter {
-        let evt = evt?;
-        if evt.value.normalize() == normalized_target {
-            count += 1;
-            if count == occurrence {
-                let size = size_map.get(signal).copied().unwrap_or(1);
-                return Ok((Some(evt), size));
-            }
-        }
-    }
-
-    let size = size_map.get(signal).copied().unwrap_or(1);
-    Ok((None, size))
+    let opened = opened::OpenedVcd::open(path)?;
+    opened
+        .find_nth_occurrence(
+            signal,
+            target_value,
+            occurrence,
+            window,
+            &query::QueryContext::legacy_unlimited(),
+        )
+        .map_err(query::into_vcd_error)
 }
 
 pub fn tokenize_file(path: impl AsRef<Path>) -> Result<Parser<BufReader<File>>> {
@@ -498,33 +458,14 @@ pub fn count_toggles(
     targets: &[String],
     window: TimeWindow,
 ) -> Result<HashMap<String, usize>> {
-    let path_ref = path.as_ref();
-    let (signals, index, _timescale, offset) = read_signals_with_offset(path_ref)?;
-    let sizes = build_sizes(&signals);
-    let (target_map, missing) = build_target_map(&index, targets);
-    if !missing.is_empty() {
-        return Err(VcdError::MissingSignals(missing.join(", ")));
-    }
-
-    let mut toggle_counts: HashMap<String, usize> = targets.iter().map(|n| (n.clone(), 0)).collect();
-    let mut last_values: HashMap<String, String> = targets.iter().map(|n| (n.clone(), String::new())).collect();
-
-    let iter = time_value_iter_from_body(path_ref, target_map, window, offset)?;
-    for evt in iter {
-        let evt = evt?;
-        let size = sizes.get(&evt.signal).copied().unwrap_or(1);
-        let formatted = format_value_for_signal(&evt.value, size);
-        if let Some(last) = last_values.get(&evt.signal) {
-            if !last.is_empty() && *last != formatted {
-                if let Some(count) = toggle_counts.get_mut(&evt.signal) {
-                    *count += 1;
-                }
-            }
-        }
-        last_values.insert(evt.signal.clone(), formatted);
-    }
-
-    Ok(toggle_counts)
+    let opened = opened::OpenedVcd::open(path)?;
+    opened
+        .count_toggles(
+            targets,
+            window,
+            &query::QueryContext::legacy_unlimited(),
+        )
+        .map_err(query::into_vcd_error)
 }
 
 // ============================================================================
@@ -621,111 +562,6 @@ impl From<&ComparisonResult> for JsonComparisonResult {
     }
 }
 
-fn normalize_value(value: &ChangeValue) -> String {
-    match value {
-        ChangeValue::Integer(i) => {
-            // For comparison, normalize integers without leading zeros
-            i.to_string()
-        }
-        ChangeValue::Float(f) => f.to_string(),
-        ChangeValue::Text(t) => t.to_lowercase(),  // Normalize x, z, etc.
-    }
-}
-
-fn values_match(val1: &ChangeValue, val2: &ChangeValue, ignore_unknown: bool) -> bool {
-    if ignore_unknown && (is_unknown_value(val1) || is_unknown_value(val2)) {
-        return true;
-    }
-
-    match (val1, val2) {
-        (ChangeValue::Integer(a), ChangeValue::Integer(b)) => a == b,
-        (ChangeValue::Float(a), ChangeValue::Float(b)) => a.to_bits() == b.to_bits(),
-        (ChangeValue::Text(a), ChangeValue::Text(b)) => a.eq_ignore_ascii_case(b),
-        _ => normalize_value(val1) == normalize_value(val2),
-    }
-}
-
-fn is_unknown_value(value: &ChangeValue) -> bool {
-    matches!(value, ChangeValue::Text(s) if s.eq_ignore_ascii_case("x") || s.eq_ignore_ascii_case("z"))
-}
-
-fn collect_signal_values(
-    file: &str,
-    index: &SignalIndex,
-    offset: u64,
-    signals: &[String],
-    window: TimeWindow,
-) -> Result<HashMap<String, Vec<(u64, ChangeValue)>>> {
-    let (target_map, _missing) = build_target_map(index, signals);
-
-    let mut values: HashMap<String, Vec<(u64, ChangeValue)>> =
-        HashMap::with_capacity(signals.len());
-    for signal_name in signals {
-        values.insert(signal_name.clone(), Vec::new());
-    }
-
-    let iter = time_value_iter_from_body(file, target_map, window, offset)?;
-    for tv in iter {
-        let tv = tv?;
-        if let Some(entries) = values.get_mut(&tv.signal) {
-            entries.push((tv.time, tv.value));
-        }
-    }
-    Ok(values)
-}
-
-fn compare_signal_timeline(
-    signal_name: &str,
-    times1: &[(u64, ChangeValue)],
-    times2: &[(u64, ChangeValue)],
-    options: &ComparisonOptions,
-    all_mismatches: &mut Vec<SignalMismatch>,
-) -> usize {
-    let mut i = 0usize;
-    let mut j = 0usize;
-    let mut curr1 = ChangeValue::Text("x".to_string());
-    let mut curr2 = ChangeValue::Text("x".to_string());
-    let mut signal_mismatches = 0usize;
-
-    while i < times1.len() || j < times2.len() {
-        let t1 = times1.get(i).map(|(t, _)| *t).unwrap_or(u64::MAX);
-        let t2 = times2.get(j).map(|(t, _)| *t).unwrap_or(u64::MAX);
-        let t = t1.min(t2);
-        if t == u64::MAX {
-            break;
-        }
-
-        while i < times1.len() && times1[i].0 == t {
-            curr1 = times1[i].1.clone();
-            i += 1;
-        }
-        while j < times2.len() && times2[j].0 == t {
-            curr2 = times2[j].1.clone();
-            j += 1;
-        }
-
-        if !values_match(&curr1, &curr2, options.ignore_unknown) {
-            let is_unknown = is_unknown_value(&curr1) || is_unknown_value(&curr2);
-            all_mismatches.push(SignalMismatch {
-                signal_name: signal_name.to_string(),
-                time: t,
-                value1: curr1.clone(),
-                value2: curr2.clone(),
-                is_unknown,
-            });
-            signal_mismatches += 1;
-
-            if let Some(max) = options.max_mismatches {
-                if signal_mismatches >= max {
-                    break;
-                }
-            }
-        }
-    }
-
-    signal_mismatches
-}
-
 #[cfg(feature = "python")]
 pub mod python;
 
@@ -734,90 +570,13 @@ pub fn compare_vcd_files(
     file2: &str,
     options: &ComparisonOptions,
 ) -> Result<ComparisonResult> {
-    // Read both VCD files
-    let (signals1, index1, _timescale1, _offset1) = read_signals_with_offset(file1)?;
-    let (signals2, index2, _timescale2, _offset2) = read_signals_with_offset(file2)?;
-
-    // Find common signals by name
-    let mut common_signals = Vec::new();
-    let mut signals_only_in_1 = Vec::new();
-    let mut signals_only_in_2 = Vec::new();
-
-    let signal_names1: HashSet<String> = signals1.iter().map(|s| s.name.clone()).collect();
-    let signal_names2: HashSet<String> = signals2.iter().map(|s| s.name.clone()).collect();
-
-    for sig in &signals1 {
-        if signal_names2.contains(&sig.name) {
-            common_signals.push(sig.name.clone());
-        } else {
-            signals_only_in_1.push(sig.name.clone());
-        }
-    }
-
-    for sig in &signals2 {
-        if !signal_names1.contains(&sig.name) {
-            signals_only_in_2.push(sig.name.clone());
-        }
-    }
-
-    common_signals.sort();
-
-    // Filter to specific signals if requested
-    let signals_to_compare = if options.signals_only.is_empty() {
-        common_signals.clone()
-    } else {
-        let wanted: HashSet<&String> = options.signals_only.iter().collect();
-        common_signals
-            .iter()
-            .filter(|s| wanted.contains(*s))
-            .cloned()
-            .collect()
-    };
-
-    // Build time-value maps in a single scan per file
-    let values1 = collect_signal_values(
-        file1,
-        &index1,
-        _offset1,
-        &signals_to_compare,
-        options.time_window,
-    )?;
-    let values2 = collect_signal_values(
-        file2,
-        &index2,
-        _offset2,
-        &signals_to_compare,
-        options.time_window,
-    )?;
-
-    // Compare signals
-    let mut all_mismatches = Vec::new();
-    let mut signals_with_mismatches = 0;
-
-    for signal_name in &signals_to_compare {
-        let empty: Vec<(u64, ChangeValue)> = Vec::new();
-        let times1 = values1.get(signal_name).unwrap_or(&empty);
-        let times2 = values2.get(signal_name).unwrap_or(&empty);
-        let signal_mismatches =
-            compare_signal_timeline(signal_name, times1, times2, options, &mut all_mismatches);
-
-        if signal_mismatches > 0 {
-            signals_with_mismatches += 1;
-        }
-    }
-
-    let passed = all_mismatches.is_empty();
-    let total_mismatches = all_mismatches.len();
-
-    Ok(ComparisonResult {
-        file1: file1.to_string(),
-        file2: file2.to_string(),
-        common_signals,
-        signals_only_in_file1: signals_only_in_1,
-        signals_only_in_file2: signals_only_in_2,
-        mismatches: all_mismatches,
-        total_mismatches,
-        signals_with_mismatches,
-        passed,
-    })
+    let first = opened::OpenedVcd::open(file1)?;
+    let second = opened::OpenedVcd::open(file2)?;
+    first
+        .compare(
+            &second,
+            options,
+            &query::QueryContext::legacy_unlimited(),
+        )
+        .map_err(query::into_vcd_error)
 }

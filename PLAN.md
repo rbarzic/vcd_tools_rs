@@ -97,10 +97,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Batch RQ-M2-T03 through T07: reusable extraction, find/toggle, provider seam, compatibility wrappers, and CLI migration.
-2. Enforce row/result-byte limits and generation completion validation across every successful query path.
-3. Preserve accepted M0 semantics and use focused tests during development; defer the expensive complete matrix to the batch gate.
-4. Keep socket, sidecar, and cache implementation blocked until the reusable query engine passes G3.
+1. Complete final M2 batch: T08 Python module compatibility, T09 `vcd2trace` disposition, and T10 G3 evidence.
+2. Keep the Python module-level API compatible; persistent Python `Vcd` remains M7 unless an additive minimal class is explicitly approved.
+3. Run one final M2 compatibility matrix and consolidated G3 review.
+4. Keep socket, sidecar, and cache implementation blocked until G3 passes.
 
 ## Progress update template
 

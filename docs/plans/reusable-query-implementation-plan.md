@@ -512,13 +512,13 @@ Exit: Gate G3
 |---|---|---|---|
 | RQ-M2-T01 | DONE | G2 | Query context, limits, cancellation, internal error model |
 | RQ-M2-T02 | DONE | T01 | Streaming backend with target check before conversion |
-| RQ-M2-T03 | READY | T02 | Reusable extraction iterator |
-| RQ-M2-T04 | BLOCKED | T03 | Reusable find and toggle |
-| RQ-M2-T05 | BLOCKED | T03 | Timeline-provider interface and comparison adaptation |
-| RQ-M2-T06 | BLOCKED | T03-T05 | Path-based compatibility wrappers |
-| RQ-M2-T07 | BLOCKED | T06 | CLI uses one `OpenedVcd` per input |
-| RQ-M2-T08 | BLOCKED | T06 | Python module functions use temporary `OpenedVcd` |
-| RQ-M2-T09 | BLOCKED | T06 | Evaluate `vcd2trace` migration |
+| RQ-M2-T03 | DONE | T02 | Reusable extraction iterator |
+| RQ-M2-T04 | DONE | T03 | Reusable find and toggle |
+| RQ-M2-T05 | DONE | T03 | Timeline-provider interface and comparison adaptation |
+| RQ-M2-T06 | DONE | T03-T05 | Path-based compatibility wrappers |
+| RQ-M2-T07 | DONE | T06 | CLI uses one `OpenedVcd` per input |
+| RQ-M2-T08 | READY | T06 | Python module functions use temporary `OpenedVcd` |
+| RQ-M2-T09 | READY | T06 | Evaluate `vcd2trace` migration |
 | RQ-M2-T10 | BLOCKED | T01-T09 | Differential backend/compatibility evidence |
 
 ## RQ-M2-T01 — Query context
@@ -645,6 +645,23 @@ Acceptance: existing Python signatures, keys, values, and exceptions pass tests.
 Migrate only if it reduces duplication without delaying gates. Output must be byte-identical. Otherwise mark `DEFERRED` with rationale.
 
 ## Gate G3 — Query engine compatibility
+
+### T03–T07 consolidated batch evidence
+
+Status: **ACCEPTED**.
+
+- `OpenedTimeValueIter` expands selected changes into alias/duplicate request rows in accepted body/request order and checks cancellation/deadline, row count, and logical result bytes before delivery.
+- Logical event bytes are defined as UTF-8 signal name + 8-byte timestamp + 16-byte integer, 8-byte float, or UTF-8 text payload. Transport encoded-byte limits remain separate.
+- `OpenedVcd` exposes context-aware extract, find, toggle, and compare methods. Early successful find validates the generation before returning; exhausted iterators use stream-core completion validation.
+- A minimal internal timeline-provider trait supports streaming `OpenedVcd` and future cached providers. Comparison retains selected-timeline materialization as an explicit current memory limitation.
+- Path-based metadata/extract/find/toggle/compare functions now construct temporary `OpenedVcd` objects and use unlimited contexts without a global cache.
+- Native CLI handlers open each input once and use the reusable engine while exact M0 output tests remain the compatibility oracle.
+- Consolidated post-fix validation passed in debug and release: 177 Rust tests passed, 4 diagnostics ignored, 0 failed in each profile. Three Python console tests passed.
+- `cargo check --all-targets` passed for Linux x64, Windows x64 MSVC, Linux ARM64, macOS Intel, and macOS ARM64.
+- Toggle/find preparation now enforces context and signal-limit precedence before target-sized work while retaining occurrence-zero precedence.
+- Large single-signal timeline merges poll context every 4,096 consumed timeline entries, including long same-timestamp runs, and immediately before mismatch delivery.
+- Providers revalidate after collection, and both opened generations are revalidated immediately before result publication; deterministic mutation during second-provider collection returns `StaleSource`.
+- Python module migration (T08), `vcd2trace` decision/golden work (T09), and final G3 evidence (T10) remain out of this batch.
 
 Pass when:
 

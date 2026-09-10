@@ -154,6 +154,15 @@ impl SelectedChangeStream {
         self.selection.request_count
     }
 
+    pub(crate) fn validate_current_generation(&mut self) -> QueryResult<()> {
+        self.context.check()?;
+        self.parser
+            .reader()
+            .validate_complete()
+            .map_err(QueryError::from)?;
+        self.context.check()
+    }
+
     #[cfg(test)]
     pub(crate) fn command_count(&self) -> u64 {
         self.command_count

@@ -10,11 +10,13 @@ use vcd::{IdCode, Parser, VarType};
 
 use crate::catalog::{CatalogMemoryEstimate, SignalCatalog, SignalKey};
 use crate::header::read_identified_compact_header;
+use crate::query::{QueryContext, QueryResult};
 use crate::{Result, Signal, SignalIndex, Timescale, VcdError, VcdMeta};
 
 pub use identity::{
     ContentFingerprint, FileIdentity, FingerprintPolicy, GenerationId, OpenOptions,
 };
+pub(crate) use identity::{generation_mismatch_error, is_generation_mismatch};
 
 /// Memory owned by the compact signal catalog.
 ///
@@ -105,6 +107,7 @@ impl<'a> SignalRef<'a> {
 
 #[derive(Debug, Clone)]
 enum CachedMetadataError {
+    GenerationMismatch,
     Io {
         kind: io::ErrorKind,
         message: Arc<str>,
@@ -121,6 +124,7 @@ enum CachedMetadataError {
 impl CachedMetadataError {
     fn capture(error: &VcdError) -> Self {
         match error {
+            VcdError::Io(error) if is_generation_mismatch(error) => Self::GenerationMismatch,
             VcdError::Io(error) => Self::Io {
                 kind: error.kind(),
                 message: Arc::from(error.to_string()),
@@ -136,6 +140,7 @@ impl CachedMetadataError {
 
     fn to_error(&self) -> VcdError {
         match self {
+            Self::GenerationMismatch => generation_mismatch_error(),
             Self::Io { kind, message } => VcdError::Io(io::Error::new(*kind, message.to_string())),
             Self::MissingEndDefinitions => VcdError::MissingEndDefinitions,
             Self::DuplicateSignal(signal) => VcdError::DuplicateSignal(signal.to_string()),
@@ -219,10 +224,143 @@ impl MetadataCache {
             // terminal outcome before this caller reacquires the lock.
             drop(state);
             self.test_hooks.after_wait_woken();
-            return self.lock_state();
+            self.lock_state()
         }
         #[cfg(not(test))]
         state
+    }
+
+    fn wait_for_change_with_context<'a>(
+        &'a self,
+        state: MutexGuard<'a, MetadataState>,
+        context: &QueryContext,
+    ) -> MutexGuard<'a, MetadataState> {
+        let state = self
+            .changed
+            .wait_timeout(state, context.metadata_wait_timeout())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0;
+        #[cfg(test)]
+        {
+            drop(state);
+            self.test_hooks.after_wait_woken();
+            self.lock_state()
+        }
+        #[cfg(not(test))]
+        state
+    }
+
+    fn get_or_build_with_context<F>(
+        &self,
+        context: &QueryContext,
+        build: F,
+    ) -> QueryResult<Arc<VcdMeta>>
+    where
+        F: FnOnce() -> Result<VcdMeta>,
+    {
+        context.check()?;
+        let mut state = self.lock_state();
+        let mut registration: Option<MetadataWaiterRegistration<'_>> = None;
+        let attempt = loop {
+            match &mut state.phase {
+                MetadataPhase::Ready(metadata) => {
+                    let metadata = Arc::clone(metadata);
+                    drop(state);
+                    context.check()?;
+                    if let Some(mut registration) = registration.take() {
+                        registration.disarm();
+                    }
+                    return Ok(metadata);
+                }
+                MetadataPhase::Failed { attempt, error, .. } => {
+                    let result = Err(error.to_error().into());
+                    let expected_attempt = *attempt;
+                    drop(state);
+                    if let Some(registration) = registration.take() {
+                        debug_assert_eq!(registration.attempt, expected_attempt);
+                        drop(registration);
+                    }
+                    context.check()?;
+                    return result;
+                }
+                MetadataPhase::Building { attempt, waiters } => {
+                    if let Some(registration) = &registration {
+                        debug_assert_eq!(registration.attempt, *attempt);
+                    } else {
+                        *waiters += 1;
+                        registration = Some(MetadataWaiterRegistration::new(self, *attempt));
+                    }
+                    if let Err(error) = context.check() {
+                        drop(state);
+                        drop(registration);
+                        return Err(error);
+                    }
+                    state = self.wait_for_change_with_context(state, context);
+                }
+                MetadataPhase::Absent => {
+                    debug_assert!(registration.is_none());
+                    context.check()?;
+                    let attempt = state.next_attempt;
+                    state.next_attempt = state.next_attempt.checked_add(1).ok_or_else(|| {
+                        crate::query::QueryError::internal(
+                            "metadata attempt identifier space exhausted",
+                        )
+                    })?;
+                    state.phase = MetadataPhase::Building {
+                        attempt,
+                        waiters: 0,
+                    };
+                    break attempt;
+                }
+            }
+        };
+        drop(state);
+
+        // Once this caller becomes the shared builder, its own cancellation no
+        // longer cancels work on behalf of registered waiters. Future query
+        // scanners can add an explicitly shared build policy without changing
+        // waiter cancellation semantics.
+        let mut guard = MetadataBuildGuard {
+            cache: self,
+            attempt,
+            armed: true,
+        };
+        #[cfg(test)]
+        self.test_hooks.before_build();
+        let result = build();
+        #[cfg(test)]
+        self.test_hooks.before_publish();
+        let mut state = self.lock_state();
+        let waiters = match &state.phase {
+            MetadataPhase::Building {
+                attempt: active,
+                waiters,
+            } if *active == attempt => *waiters,
+            _ => panic!("metadata attempt changed while its builder was active"),
+        };
+        match result {
+            Ok(metadata) => {
+                let metadata = Arc::new(metadata);
+                state.phase = MetadataPhase::Ready(Arc::clone(&metadata));
+                guard.armed = false;
+                drop(state);
+                self.changed.notify_all();
+                context.check()?;
+                Ok(metadata)
+            }
+            Err(error) => {
+                state.phase = MetadataPhase::Failed {
+                    attempt,
+                    error: CachedMetadataError::capture(&error),
+                    pending_waiters: waiters,
+                };
+                guard.armed = false;
+                drop(state);
+                self.changed.notify_all();
+                context.check()?;
+                Err(error.into())
+            }
+        }
     }
 
     fn get_or_build<F>(&self, build: F) -> Result<Arc<VcdMeta>>
@@ -358,6 +496,57 @@ impl MetadataCache {
     }
 }
 
+struct MetadataWaiterRegistration<'a> {
+    cache: &'a MetadataCache,
+    attempt: u64,
+    active: bool,
+}
+
+impl<'a> MetadataWaiterRegistration<'a> {
+    fn new(cache: &'a MetadataCache, attempt: u64) -> Self {
+        Self {
+            cache,
+            attempt,
+            active: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for MetadataWaiterRegistration<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let mut state = self.cache.lock_state();
+        let notify = match &mut state.phase {
+            MetadataPhase::Building { attempt, waiters } if *attempt == self.attempt => {
+                debug_assert!(*waiters > 0);
+                *waiters -= 1;
+                false
+            }
+            MetadataPhase::Failed {
+                attempt,
+                pending_waiters,
+                ..
+            } if *attempt == self.attempt => {
+                debug_assert!(*pending_waiters > 0);
+                *pending_waiters -= 1;
+                *pending_waiters == 0
+            }
+            MetadataPhase::Ready(_) | MetadataPhase::Absent => false,
+            _ => false,
+        };
+        drop(state);
+        if notify {
+            self.cache.changed.notify_all();
+        }
+    }
+}
+
 struct MetadataBuildGuard<'a> {
     cache: &'a MetadataCache,
     attempt: u64,
@@ -394,6 +583,7 @@ struct MetadataTestHooks {
     panic_once: std::sync::atomic::AtomicBool,
     after_wait: Mutex<Option<MetadataTestPause>>,
     before_validation: Mutex<Option<MetadataTestPause>>,
+    before_publish: Mutex<Option<MetadataTestPause>>,
 }
 
 #[cfg(test)]
@@ -414,6 +604,7 @@ impl MetadataTestHooks {
             panic_once: std::sync::atomic::AtomicBool::new(false),
             after_wait: Mutex::new(None),
             before_validation: Mutex::new(None),
+            before_publish: Mutex::new(None),
         }
     }
 
@@ -445,6 +636,10 @@ impl MetadataTestHooks {
 
     fn before_validation(&self) {
         Self::pause(&self.before_validation);
+    }
+
+    fn before_publish(&self) {
+        Self::pause(&self.before_publish);
     }
 }
 
@@ -644,6 +839,18 @@ impl OpenedVcd {
         self.inner.metadata.get_or_build(|| self.compute_metadata())
     }
 
+    /// Return exact metadata under a transport-neutral query policy.
+    ///
+    /// Cancellation or deadline expiry while waiting releases this caller's
+    /// attempt acknowledgement through RAII. It does not cancel a shared
+    /// builder. Once a caller becomes the builder, the scan completes for all
+    /// registered waiters even if that caller's token is later cancelled.
+    pub fn metadata_with_context(&self, context: &QueryContext) -> QueryResult<Arc<VcdMeta>> {
+        self.inner
+            .metadata
+            .get_or_build_with_context(context, || self.compute_metadata())
+    }
+
     /// Retry metadata after a cached failed attempt.
     ///
     /// Ready metadata is returned without another scan. Concurrent retry
@@ -769,6 +976,8 @@ mod tests {
 
     use tempfile::tempdir;
     use vcd::Command;
+
+    use crate::query::{CancellationToken, QueryErrorCode};
 
     use super::*;
 
@@ -1086,6 +1295,126 @@ mod tests {
             repeated_listed_bytes,
             repeated_lookup_size,
         ));
+    }
+
+    #[test]
+    fn cancelled_context_does_not_start_metadata_work() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        let context = QueryContext::new().with_cancellation(cancellation);
+        let error = opened
+            .metadata_with_context(&context)
+            .expect_err("cancelled before metadata");
+        assert_eq!(error.code(), QueryErrorCode::Cancelled);
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            0
+        );
+        assert!(!opened.has_cached_metadata());
+    }
+
+    #[test]
+    fn cancelled_metadata_waiter_releases_registration_without_cancelling_builder() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("pause lock") = Some(pause);
+
+        let builder = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata())
+        };
+        reached.wait();
+
+        let cancellation = CancellationToken::new();
+        let waiter = {
+            let opened = opened.clone();
+            let context = QueryContext::new().with_cancellation(cancellation.clone());
+            thread::spawn(move || opened.metadata_with_context(&context))
+        };
+        wait_for_metadata_waiters(&opened, 1);
+        cancellation.cancel();
+        let error = waiter
+            .join()
+            .expect("waiter thread")
+            .expect_err("waiter cancelled");
+        assert_eq!(error.code(), QueryErrorCode::Cancelled);
+        wait_for_metadata_waiters(&opened, 0);
+
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("pause lock") = None;
+        resume.wait();
+        let metadata = builder.join().expect("builder thread").expect("metadata");
+        assert_eq!((metadata.start_time, metadata.end_time), (0, 25));
+        assert!(opened.has_cached_metadata());
+    }
+
+    #[test]
+    fn controlled_deadline_metadata_waiter_releases_failed_attempt_acknowledgement() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        opened
+            .inner
+            .metadata
+            .test_hooks
+            .fail_once
+            .store(true, Ordering::SeqCst);
+        let (build_pause, build_reached, build_resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("build pause lock") = Some(build_pause);
+
+        let builder = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata())
+        };
+        build_reached.wait();
+
+        let context = QueryContext::new();
+        let waiter = {
+            let opened = opened.clone();
+            let waiter_context = context.clone();
+            thread::spawn(move || opened.metadata_with_context(&waiter_context))
+        };
+        wait_for_metadata_waiters(&opened, 1);
+        context.expire_deadline_for_test();
+        let error = waiter
+            .join()
+            .expect("waiter thread")
+            .expect_err("deadline exceeded");
+        assert_eq!(error.code(), QueryErrorCode::DeadlineExceeded);
+        wait_for_metadata_waiters(&opened, 0);
+
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .pause
+            .lock()
+            .expect("build pause lock") = None;
+        build_resume.wait();
+        assert!(builder.join().expect("builder thread").is_err());
+        let metadata = opened.retry_metadata().expect("retry is not stranded");
+        assert_eq!((metadata.start_time, metadata.end_time), (0, 25));
     }
 
     #[test]
@@ -1439,6 +1768,201 @@ mod tests {
                 .scans
                 .load(Ordering::SeqCst),
             2
+        );
+    }
+
+    #[test]
+    fn elected_builder_cancellation_after_scan_keeps_ready_metadata_cached() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        let cancellation = CancellationToken::new();
+        let context = QueryContext::new().with_cancellation(cancellation.clone());
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .before_validation
+            .lock()
+            .expect("validation pause lock") = Some(pause);
+        let worker = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata_with_context(&context))
+        };
+        reached.wait();
+        cancellation.cancel();
+        resume.wait();
+        let error = worker
+            .join()
+            .expect("worker")
+            .expect_err("elected caller must observe cancellation");
+        assert_eq!(error.code(), QueryErrorCode::Cancelled);
+        let cached = opened.metadata().expect("ready metadata remains cached");
+        assert_eq!((cached.start_time, cached.end_time), (0, 25));
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            1
+        );
+    }
+
+    #[test]
+    fn elected_builder_controlled_deadline_after_scan_keeps_ready_metadata_cached() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        let context = QueryContext::new();
+        let worker_context = context.clone();
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .before_validation
+            .lock()
+            .expect("validation pause lock") = Some(pause);
+        let worker = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata_with_context(&worker_context))
+        };
+        reached.wait();
+        context.expire_deadline_for_test();
+        resume.wait();
+        let error = worker
+            .join()
+            .expect("worker")
+            .expect_err("elected caller must observe deadline");
+        assert_eq!(error.code(), QueryErrorCode::DeadlineExceeded);
+        let cached = opened.metadata().expect("ready metadata remains cached");
+        assert_eq!((cached.start_time, cached.end_time), (0, 25));
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            1
+        );
+    }
+
+    #[test]
+    fn elected_builder_cancellation_after_failed_build_keeps_error_cached() {
+        let opened = OpenedVcd::open(SEMANTICS).expect("open");
+        opened
+            .inner
+            .metadata
+            .test_hooks
+            .fail_once
+            .store(true, Ordering::SeqCst);
+        let cancellation = CancellationToken::new();
+        let context = QueryContext::new().with_cancellation(cancellation.clone());
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .before_publish
+            .lock()
+            .expect("publish pause lock") = Some(pause);
+        let worker = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata_with_context(&context))
+        };
+        reached.wait();
+        cancellation.cancel();
+        resume.wait();
+        let error = worker
+            .join()
+            .expect("worker")
+            .expect_err("elected caller must observe cancellation");
+        assert_eq!(error.code(), QueryErrorCode::Cancelled);
+        let cached = opened.metadata().expect_err("failed build remains cached");
+        assert!(
+            cached
+                .to_string()
+                .contains("injected metadata build failure")
+        );
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            1
+        );
+    }
+
+    #[test]
+    fn stale_metadata_attempt_preserves_typed_error_for_builder_waiters_and_cache() {
+        let (_directory, path) = copy_fixture();
+        let opened = OpenedVcd::open(&path).expect("open");
+        let (pause, reached, resume) = metadata_pause();
+        *opened
+            .inner
+            .metadata
+            .test_hooks
+            .before_validation
+            .lock()
+            .expect("validation pause lock") = Some(pause);
+
+        let builder = {
+            let opened = opened.clone();
+            thread::spawn(move || opened.metadata_with_context(&QueryContext::legacy_unlimited()))
+        };
+        reached.wait();
+
+        let waiters = (0..2)
+            .map(|_| {
+                let opened = opened.clone();
+                thread::spawn(move || {
+                    opened.metadata_with_context(&QueryContext::legacy_unlimited())
+                })
+            })
+            .collect::<Vec<_>>();
+        wait_for_metadata_waiters(&opened, 2);
+
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("append open")
+            .write_all(b"\n#999\n")
+            .expect("append");
+        resume.wait();
+
+        let mut errors = vec![
+            builder
+                .join()
+                .expect("builder")
+                .expect_err("builder must reject stale source"),
+        ];
+        errors.extend(waiters.into_iter().map(|waiter| {
+            waiter
+                .join()
+                .expect("waiter")
+                .expect_err("waiter must receive stale source")
+        }));
+        errors.push(
+            opened
+                .metadata_with_context(&QueryContext::legacy_unlimited())
+                .expect_err("cached metadata call must remain stale"),
+        );
+
+        let expected = "I/O error: VCD source does not match the opened generation";
+        for error in &errors {
+            assert_eq!(error.code(), QueryErrorCode::StaleSource);
+            assert_eq!(error.to_string(), expected);
+        }
+        assert_eq!(
+            opened
+                .inner
+                .metadata
+                .test_hooks
+                .scans
+                .load(Ordering::SeqCst),
+            1
         );
     }
 

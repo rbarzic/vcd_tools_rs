@@ -97,8 +97,8 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Begin RQ-M2-T01: transport-neutral query context, limits, cancellation, and internal error model.
-2. Then implement T02/T03: selected-ID-first streaming decoder and reusable extraction iterator.
+1. Implement RQ-M2-T02: selected-ID-first streaming decoder with context checks and command budgets.
+2. Then implement T03: reusable extraction iterator with row/result limits and completion validation.
 3. Preserve the accepted M0 compatibility suite and M1 generation/completion-validation guarantees.
 4. Keep socket, sidecar, and cache implementation blocked until the reusable query engine passes G3.
 

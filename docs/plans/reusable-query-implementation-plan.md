@@ -510,8 +510,8 @@ Exit: Gate G3
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M2-T01 | READY | G2 | Query context, limits, cancellation, internal error model |
-| RQ-M2-T02 | BLOCKED | T01 | Streaming backend with target check before conversion |
+| RQ-M2-T01 | DONE | G2 | Query context, limits, cancellation, internal error model |
+| RQ-M2-T02 | READY | T01 | Streaming backend with target check before conversion |
 | RQ-M2-T03 | BLOCKED | T02 | Reusable extraction iterator |
 | RQ-M2-T04 | BLOCKED | T03 | Reusable find and toggle |
 | RQ-M2-T05 | BLOCKED | T03 | Timeline-provider interface and comparison adaptation |
@@ -523,6 +523,10 @@ Exit: Gate G3
 
 ## RQ-M2-T01 — Query context
 
+Status: **ACCEPTED**.
+
+Reviewer verified public extensibility, no `VcdError` break, cancellation/deadline ordering, attempt-stable metadata waiter acknowledgements, elected-builder post-publication checks, typed stale-generation caching/classification, timeout overflow behavior, deterministic controlled tests, and preserved source chains.
+
 Acceptance:
 
 - transport-neutral cancellation token and finite/unlimited limits;
@@ -530,6 +534,25 @@ Acceptance:
 - checks at defined command/timestamp/allocation/emission/wait points;
 - old wrappers can select legacy-unlimited behavior;
 - typed errors map cleanly to legacy strings and later protocol codes.
+
+Implementation status: **IN REVIEW**.
+
+Evidence:
+
+- `src/query/mod.rs` adds cheap-clone `CancellationToken`, extensible `QueryContext`/`QueryLimits`, stable `QueryErrorCode`/`QueryLimitKind`, structured `QueryError`, and `QueryResult` without changing `VcdError`.
+- Limits cover signals, rows, encoded/result bytes, commands/scan budget, and absolute/relative deadlines. `QueryContext::legacy_unlimited` is the explicit compatibility policy.
+- Cancellation uses one shared atomic flag; ordinary checks are lock-free. Metadata waits use bounded condition-variable timeouts so cancellation/deadline is observed without a transport dependency.
+- `OpenedVcd::metadata_with_context` checks cancellation before work, uses cancellation-safe RAII waiter registration, and preserves existing `metadata()` behavior. Cancelling a waiter does not cancel the shared builder; once elected, a metadata builder completes and publishes its cache outcome for other callers, then performs one final context check before returning to the elected caller.
+- Generation mismatch uses a crate-private typed `io::Error` payload detected through downcast, while preserving the exact legacy display text and avoiding a new `VcdError` variant. `CachedMetadataError` has a dedicated `GenerationMismatch` case and reconstructs the same typed payload, so elected builders, attempt-registered waiters, and later cached contextual callers all retain `STALE_SOURCE`; similarly worded ordinary I/O remains `SOURCE_UNAVAILABLE`.
+- Overflowing relative deadlines such as `Duration::MAX` are documented and treated as effectively unlimited rather than immediately expired.
+- Deadline waiter tests use a shared test-controlled expiration flag after explicit waiter registration; they do not depend on scheduler timing or wall-clock sleeps.
+- Structured query errors distinguish cancellation, deadline, specific limits, stale source, queue full, source unavailable, VCD failures, and internal failures with stable transport-facing codes and error sources where applicable.
+- Unit/public integration coverage includes token propagation, all builders/accessors, cancellation precedence, deadline and overflow, every limit, display/code/source mapping, real stale-source mutation, attempt-stable cached stale-source classification for elected builder/two waiters/later caller, cancellation before work, cancellation/deadline while registered, waiter acknowledgement cleanup, retry recovery, shared-builder success, and elected-builder cancellation/deadline after Ready/Failed publication with cached outcomes retained.
+- Complete serial debug and release suites each pass 153 non-ignored Rust tests with 3 release diagnostics ignored; 3 Python console tests and `cargo doc --no-deps` pass.
+- `cargo check --all-targets` passes for the host plus Windows x64 MSVC, Linux ARM64, macOS Intel, and macOS ARM64 targets under CR-002.
+- Changed-file `rustfmt --check`, `git diff --check`, and Markdown link validation pass.
+
+Remaining for review: fresh-context reviewer acceptance. T02 remains blocked until T01 is accepted.
 
 ## RQ-M2-T02 — Optimized stream decoder
 

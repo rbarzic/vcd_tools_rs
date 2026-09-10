@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -300,12 +301,26 @@ fn same_platform_identity(_before: &Metadata, _after: &Metadata) -> bool {
     true
 }
 
-fn generation_mismatch_error() -> crate::VcdError {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        "VCD source does not match the opened generation",
-    )
-    .into()
+#[derive(Debug)]
+struct GenerationMismatch;
+
+impl fmt::Display for GenerationMismatch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("VCD source does not match the opened generation")
+    }
+}
+
+impl std::error::Error for GenerationMismatch {}
+
+pub(crate) fn is_generation_mismatch(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<GenerationMismatch>())
+        .is_some()
+}
+
+pub(crate) fn generation_mismatch_error() -> crate::VcdError {
+    io::Error::new(io::ErrorKind::InvalidData, GenerationMismatch).into()
 }
 
 fn fingerprint_samples(file: &mut File, len: u64) -> Result<ContentFingerprint> {
@@ -444,6 +459,30 @@ mod tests {
         )
         .expect_err("invalid offset");
         assert!(error.to_string().contains("body offset"));
+    }
+
+    #[test]
+    fn generation_mismatch_uses_typed_payload_with_legacy_text() {
+        let vcd_error = generation_mismatch_error();
+        assert_eq!(
+            vcd_error.to_string(),
+            "I/O error: VCD source does not match the opened generation"
+        );
+        let error = match vcd_error {
+            crate::VcdError::Io(error) => error,
+            error => panic!("unexpected error: {error}"),
+        };
+        assert_eq!(
+            error.to_string(),
+            "VCD source does not match the opened generation"
+        );
+        assert!(is_generation_mismatch(&error));
+        assert!(
+            error
+                .get_ref()
+                .and_then(|source| source.downcast_ref::<GenerationMismatch>())
+                .is_some()
+        );
     }
 
     #[test]

@@ -191,24 +191,30 @@ Target: at least 40% reduction in incremental peak RSS attributable to header/ca
 
 ## 7. Query context and limits
 
-All reusable methods accept an internal or public context equivalent to:
+All reusable methods accept an extensible transport-neutral context equivalent to:
 
 ```rust
+#[non_exhaustive]
 pub struct QueryContext {
-    pub cancellation: CancellationToken,
-    pub limits: QueryLimits,
+    cancellation: CancellationToken,
+    limits: QueryLimits,
 }
 
+#[non_exhaustive]
 pub struct QueryLimits {
-    pub max_signals: usize,
-    pub max_rows: Option<u64>,
-    pub max_result_bytes: Option<u64>,
-    pub max_commands: Option<u64>,
-    pub deadline: Option<Instant>,
+    max_signals: Option<usize>,
+    max_rows: Option<u64>,
+    max_result_bytes: Option<u64>,
+    max_commands: Option<u64>,
+    deadline: Option<Instant>,
 }
 ```
 
-Compatibility wrappers use an uncancelled context with legacy-unbounded result behavior. The server always supplies finite limits.
+Construction uses builders and read-only accessors so later limits remain additive. Compatibility wrappers use `QueryContext::legacy_unlimited()`, an uncancelled context with legacy-unbounded result behavior. The server always supplies finite limits.
+
+`CancellationToken` is a cheap-clone shared atomic flag. Query checks are lock-free except when a caller is already waiting on shared work. Metadata waits use bounded condition-variable wakeups and an RAII registration: cancellation/deadline releases either the active-attempt waiter count or failed-attempt acknowledgement and cannot strand retry. A cancelled waiter does not cancel a shared metadata builder. Once elected, that builder publishes its Ready/Failed outcome for the generation's other callers and then performs a final context check before delivering to the elected caller; cancellation/deadline can therefore change that caller's result without discarding the reusable cache outcome. Later query/index builders must document any different ownership rule explicitly.
+
+`QueryError` is additive and non-exhaustive rather than adding variants to the existing exhaustive `VcdError`. Stable categories cover cancellation, deadline, specific limit, stale source, queue full, source unavailable, VCD failure, and internal failure. Generation mismatch is represented by a crate-private typed `io::Error` payload and downcast into `STALE_SOURCE`; metadata's cached error representation has a dedicated generation-mismatch case that reconstructs the typed payload, preserving classification and exact legacy display across builders, waiters, and later cached callers. Relative timeout overflow is treated as an absent/effectively unlimited deadline, never as immediately expired.
 
 Cancellation/deadline checks occur:
 

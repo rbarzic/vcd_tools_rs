@@ -1,6 +1,7 @@
 mod catalog;
 mod header;
 pub mod opened;
+pub mod query;
 
 pub use opened::{
     CatalogMemoryUsage, ContentFingerprint, FileIdentity, FingerprintPolicy, GenerationId,

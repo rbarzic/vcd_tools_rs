@@ -51,16 +51,20 @@ cargo build --release
 
 ## Global Options
 
-These options apply to all subcommands and must be placed **before** the subcommand name:
+Most global options apply before the subcommand. `--pretty` is declared as a global Clap flag and is accepted either before the subcommand or after subcommand arguments:
 
 ```sh
 vcd_tools_rs [GLOBAL OPTIONS] <SUBCOMMAND> [SUBCOMMAND OPTIONS]
+vcd_tools_rs --pretty meta simulation.vcd
+vcd_tools_rs meta simulation.vcd --pretty
 ```
+
+`--log-level` remains a top-level option and should be placed before the subcommand. The pip-installed Python console currently accepts `--pretty` only before the subcommand; this known compatibility exception is tracked in `docs/design/current-compatibility-contract.md`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--log-level <LEVEL>` | `info` | Logging verbosity: `error`, `warn`, `info`, `debug` |
-| `--pretty` | false | Render output as formatted tables instead of tab-separated values |
+| `--pretty` | false | Render output as formatted tables instead of tab-separated values; native CLI accepts it before or after the subcommand |
 
 ---
 

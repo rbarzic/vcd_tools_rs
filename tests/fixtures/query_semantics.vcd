@@ -1,0 +1,47 @@
+$date
+    semantic fixture
+$end
+$version
+    vcd_tools_rs characterization
+$end
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! a $end
+$var wire 1 ! alias_a $end
+$var wire 1 " b $end
+$var wire 4 # vec4 [3:0] $end
+$var wire 129 $ wide [128:0] $end
+$var real 64 % real_sig $end
+$var string 1 & str_sig $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+0!
+0"
+b0000 #
+b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 $
+r0.0 %
+sboot &
+$end
+#5
+1!
+1"
+b1010 #
+#10
+0!
+x"
+b10xz #
+b100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 $
+r1.5 %
+srun &
+#10
+1"
+#15
+1!
+z"
+b1111 #
+#20
+0!
+0"
+#25
+1!

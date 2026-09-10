@@ -1,0 +1,13 @@
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! value $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+#10
+1!
+#5
+0!
+#12
+1!

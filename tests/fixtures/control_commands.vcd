@@ -1,0 +1,23 @@
+$comment header comment retained by parser $end
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! controlled $end
+$upscope $end
+$enddefinitions $end
+$comment body comment before dumpvars $end
+$dumpvars
+0!
+$end
+#5
+$comment comment between timestamps $end
+$dumpoff
+x!
+$end
+#10
+$dumpon
+1!
+$end
+#15
+$dumpall
+z!
+$end

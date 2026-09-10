@@ -1,0 +1,9 @@
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! duplicate $end
+$var wire 1 " duplicate $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+1"

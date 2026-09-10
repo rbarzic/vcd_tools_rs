@@ -1,0 +1,8 @@
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 ! only $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+1!
+$end

@@ -1,8 +1,8 @@
 # Reusable Query, Index, and Server Implementation Plan
 
-Plan ID: **VCD-RQ-001**  
-Status: **APPROVED — IMPLEMENTATION IN PROGRESS**  
-Dashboard: [`../../PLAN.md`](../../PLAN.md)  
+Plan ID: **VCD-RQ-001**
+Status: **APPROVED — IMPLEMENTATION IN PROGRESS**
+Dashboard: [`../../PLAN.md`](../../PLAN.md)
 Architecture: [`../design/reusable-query-architecture.md`](../design/reusable-query-architecture.md)
 
 ## 1. How to use this plan
@@ -89,19 +89,19 @@ M4 may begin after the required scheduler/protocol spikes in M3; it does not wai
 
 # M0 — Decisions, semantic lock, and authoritative baseline
 
-Milestone status: `IN_PROGRESS`  
-Entry: Gate G0 passed  
-Exit: Gate G1
+Milestone status: `DONE`
+Entry: Gate G0 passed
+Exit: Gate G1 passed
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
 | RQ-M0-T01 | DONE | — | Approve/amend D-001 through D-010 in `PLAN.md` |
-| RQ-M0-T02 | READY | T01 | Inventory public Rust, CLI, Python, and `vcd2trace` contracts |
-| RQ-M0-T03 | BLOCKED | T02 | Add focused semantic fixtures |
-| RQ-M0-T04 | BLOCKED | T03 | Add characterization and golden compatibility tests |
-| RQ-M0-T05 | READY | T02 | Build benchmark harness and scripts |
-| RQ-M0-T06 | BLOCKED | T05 | Capture fresh baseline from current checkout |
-| RQ-M0-T07 | BLOCKED | T04,T06 | Approve G1 semantic/performance baseline |
+| RQ-M0-T02 | DONE | T01 | Inventory public Rust, CLI, Python, and `vcd2trace` contracts |
+| RQ-M0-T03 | DONE | T02 | Add focused semantic fixtures |
+| RQ-M0-T04 | DONE | T03 | Add characterization and golden compatibility tests |
+| RQ-M0-T05 | DONE | T02 | Build benchmark harness and scripts |
+| RQ-M0-T06 | DONE | T05 | Capture fresh baseline from current checkout |
+| RQ-M0-T07 | DONE | T04,T06 | Approve G1 semantic/performance baseline after review |
 
 ## RQ-M0-T01 — Approve product boundary
 
@@ -210,6 +210,33 @@ Acceptance:
 
 ## Gate G1 — Semantic and baseline lock
 
+Current status: **PASSED**.
+
+Reviewer decision:
+
+- no remaining M0 issues found;
+- RQ-M0-T02 through T06 accepted as `DONE`;
+- complete serial Rust suite: 92 passed, 0 failed;
+- focused Python console suite: 3 passed;
+- durable benchmark records and compatibility claims accepted;
+- default-parallel SIGKILL accepted as a documented resource constraint rather than a semantic failure.
+
+Completed evidence:
+
+- `docs/design/current-compatibility-contract.md` inventories the public Rust, native CLI, Python, `vcd2trace`, packaging, error, and semantic contracts, with explicit Python/trace test exceptions assigned to later tasks.
+- Eleven focused fixtures plus 21 semantic tests cover aliases, duplicate requests, body/same-time order, exact/inverted/decreasing windows and current early-stop behavior, comments and dump-control commands, dumpvars/no timestamp, empty body, scalar/X/Z, known/unknown/wide vectors, real/string values, CRLF/special scopes, duplicate names, malformed bodies, find, toggle, and expanded compare policy/order cases.
+- Fourteen native CLI tests lock version, filtered/full list, metadata, `--pretty` before/after, aligned extraction, signals files, toggle/find found/not-found behavior, compare JSON/compact/default shapes and successful mismatch exit, and errors.
+- Three pure-Python console tests lock the documented current divergences for post-subcommand `--pretty` and extraction carry-forward; compiled extension runtime remains an explicit M2/M7 exception.
+- `scripts/bench-vcd.sh` and `scripts/bench-rss.sh` fingerprint every primary/secondary input, record complete output/error hashes, optionally verify expected hashes, persist artifacts, and capture version/commit/environment/filesystem/storage/GNU time/RSS/I/O for open/list/meta/extract/find/toggle/compare.
+- A fresh `0.1.7` baseline with full hashes, dataset fingerprints, meaningful catalog output, and cheap list/find/extract/compare/batched cases for both supplied VCDs is durably recorded under `docs/benchmarks/artifacts/m0/`; existing full meta/toggle evidence remains documented.
+- `cargo check --all-targets`, 38 focused Rust/Python characterization tests, and the complete serial Rust suite (92 tests: 57 existing, 21 semantic, 14 native CLI) pass.
+
+Resource constraints and accepted exceptions:
+
+- Default parallel `cargo test --all-targets` was killed by SIGKILL while existing large-fixture tests concurrently constructed several ~400 MiB indexes. This is a test-runner resource constraint, not a semantic failure. The review-required serial command passes the complete suite. CI should explicitly set one test thread for this fixture until M1 reduces catalog memory or tests are otherwise serialized.
+- Project-wide `cargo fmt --all -- --check` still exposes formatting drift in pre-existing production files, and `cargo clippy --all-targets -- -D warnings` reports pre-existing style lints in `src/lib.rs`. All newly added Rust tests pass direct `rustfmt --check`, and `cargo check --all-targets` passes; unrelated source cleanup remains out of M0 scope.
+- Compiled Python-extension runtime and byte-golden `vcd2trace` coverage remain explicit later-milestone exceptions.
+
 Pass only when:
 
 - current code passes characterization tests;
@@ -221,13 +248,14 @@ Pass only when:
 
 # M1 — Compact catalog and `OpenedVcd`
 
-Milestone status: `BLOCKED` on G1  
+Milestone status: `IN_PROGRESS`
+Entry: Gate G1 passed
 Exit: Gate G2
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M1-T01 | BLOCKED | G1 | Define `FileIdentity`, `GenerationId`, `OpenOptions` |
-| RQ-M1-T02 | BLOCKED | G1 | Implement compact scope/name/signal catalog |
+| RQ-M1-T01 | READY | G1 | Define `FileIdentity`, `GenerationId`, `OpenOptions` |
+| RQ-M1-T02 | READY | G1 | Implement compact scope/name/signal catalog |
 | RQ-M1-T03 | BLOCKED | T02 | Refactor header parsing to populate catalog directly |
 | RQ-M1-T04 | BLOCKED | T01,T03 | Implement `OpenedVcd::open` and accessors |
 | RQ-M1-T05 | BLOCKED | T04 | Implement independent generation-validated readers |
@@ -347,7 +375,7 @@ Pass when:
 
 # M2 — Transport-neutral query engine and compatibility wrappers
 
-Milestone status: `BLOCKED` on G2  
+Milestone status: `BLOCKED` on G2
 Exit: Gate G3
 
 | ID | Status | Depends on | Deliverable |
@@ -452,7 +480,7 @@ Pass when:
 
 # M3 — Required technical spikes and design freeze
 
-Milestone status: `BLOCKED` on G3  
+Milestone status: `BLOCKED` on G3
 Exit: Gate G4
 
 | ID | Status | Depends on | Deliverable |
@@ -535,7 +563,7 @@ Required decisions:
 
 # M4 — Experimental bounded Unix-socket server, streaming backend
 
-Milestone status: `BLOCKED` on G4  
+Milestone status: `BLOCKED` on G4
 Exit: Gate G5
 
 | ID | Status | Depends on | Deliverable |
@@ -662,7 +690,7 @@ Pass when:
 
 # M5 — Sparse persistent sidecar
 
-Milestone status: `BLOCKED` on M3 offset spike  
+Milestone status: `BLOCKED` on M3 offset spike
 Exit: Gate G6
 
 | ID | Status | Depends on | Deliverable |
@@ -697,7 +725,7 @@ Pass when exact backend equivalence, mutation/corruption safety, atomic publicat
 
 # M6 — Bounded selective timeline cache
 
-Milestone status: `BLOCKED` on M2 and M3 representation spike  
+Milestone status: `BLOCKED` on M2 and M3 representation spike
 Exit: Gate G7
 
 | ID | Status | Depends on | Deliverable |
@@ -734,7 +762,7 @@ Select `Off`, `Lazy`, or another default only from workload evidence. Initial st
 
 # M7 — Persistent Python API, hardening, CI, and rollout
 
-Milestone status: `BLOCKED` on G5 and selected optional backends  
+Milestone status: `BLOCKED` on G5 and selected optional backends
 Exit: Gate G8
 
 | ID | Status | Depends on | Deliverable |
@@ -919,7 +947,7 @@ Follow [`../benchmarks/reusable-query-baseline.md`](../benchmarks/reusable-query
 | R-17 | Async runtime adds packaging complexity | Medium | thread/channel spike first; evidence required for runtime | OPEN |
 | R-18 | Existing compare/pretty/Python materialization remains large | Medium | Explicit limits/server deferral; track separate improvements | OPEN |
 | R-19 | VCD mutates after stream chunks consumed | High | terminal incomplete/stale contract; immutable-source docs | OPEN |
-| R-20 | Benchmark conclusions use stale binary | High | M0 fresh release build and version check | OPEN |
+| R-20 | Benchmark conclusions use stale binary | High | M0 fresh release build and version check | CLOSED at G1 |
 
 # 6. Change-control records
 

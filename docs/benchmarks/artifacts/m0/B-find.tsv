@@ -1,0 +1,29 @@
+record	value
+schema	vcd_tools_benchmark_v2
+artifact_record	not-persisted-by-script
+binary	./target/release/vcd_tools_rs
+binary_version	vcd_tools_rs 0.1.7 
+git_commit	02decd790615af5ce7f7d21550c00e5ca5098ab5
+git_dirty	true
+rustc	rustc 1.93.1 (01f6ddf75 2026-02-11);binary: rustc;commit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf;commit-date: 2026-02-11;host: x86_64-unknown-linux-gnu;release: 1.93.1;LLVM version: 21.1.8;
+cargo	cargo 1.93.1 (083ac5135 2025-12-15)
+uname	Linux onio-ws13 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+cpu	12th Gen Intel(R) Core(TM) i9-12900K
+memory_kib	65577852
+filesystem	ext4   /dev/nvme0n1p2 /
+storage_devices	loop0   loop    0 ;loop1   loop    0 ;loop2   loop    0 ;loop3   loop    0 ;loop4   loop    0 ;loop5   loop    0 ;loop6   loop    0 ;loop7   loop    0 ;loop8   loop    0 ;loop9   loop    0 ;loop10  loop    0 ;loop11  loop    0 ;loop12  loop    0 ;loop13  loop    0 ;loop14  loop    0 ;loop15  loop    0 ;loop16  loop    0 ;loop17  loop    0 ;loop18  loop    0 ;loop20  loop    0 ;loop21  loop    0 ;loop22  loop    0 ;loop23  loop    0 ;loop24  loop    0 ;loop25  loop    0 ;nvme1n1 disk    0 KINGSTON SFYRD2000G;nvme2n1 disk    0 WDS100T1X0E-00AFY0;nvme0n1 disk    0 WD_BLACK SN7100 2TB;
+primary_vcd_path	/home/roba/work/gitlab/icdesign/chips/polaris-hw/sim/ctests/calibrate_rcosc33/tb.vcd
+primary_vcd_size_bytes	1031850745
+primary_vcd_mtime	2026-07-15 14:41:23.189051374 +0200
+primary_vcd_sha256	9cdb6e87f05c5a20f30ac88cb73df7488bc6a7a2201a9b1bab415864388624f2
+primary_vcd_hash_verified	not-requested
+operation	find
+command	./target/release/vcd_tools_rs find /home/roba/work/gitlab/icdesign/chips/polaris-hw/sim/ctests/calibrate_rcosc33/tb.vcd --signal tb.U_ALDEBARAN_MONITOR.cache_clk --value 1 --occurrence 1 
+cache_policy	uncontrolled; page cache not dropped
+run_1_timing	elapsed_s=0.51	user_s=0.41	system_s=0.10	max_rss_kib=425044	fs_inputs=0	fs_outputs=8	exit=0
+run_1_output_bytes	53
+run_1_output_sha256	a343865c5580a468cce0a588ff149946ad974d96344237cf0cd6fe421adab90b
+run_1_stderr_bytes	0
+run_1_stderr_sha256	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+run_1_status	0
+run_1_output_hash_verified	not-requested

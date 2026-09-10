@@ -30,11 +30,12 @@ Recommended v1 product boundary:
 
 | Document | Purpose | Status |
 |---|---|---|
-| [`docs/plans/reusable-query-implementation-plan.md`](docs/plans/reusable-query-implementation-plan.md) | Work breakdown, dependencies, task status, acceptance criteria, validation, risks, and gates | PROPOSED |
+| [`docs/plans/reusable-query-implementation-plan.md`](docs/plans/reusable-query-implementation-plan.md) | Work breakdown, dependencies, task status, acceptance criteria, validation, risks, and gates | APPROVED; M1 IN PROGRESS |
+| [`docs/design/current-compatibility-contract.md`](docs/design/current-compatibility-contract.md) | Characterized Rust, native CLI, Python, trace, packaging, errors, and semantic compatibility boundary | ACCEPTED AT G1 |
 | [`docs/design/reusable-query-architecture.md`](docs/design/reusable-query-architecture.md) | Core ownership, data model, semantics, query backends, invalidation, and compatibility | DRAFT |
 | [`docs/design/sidecar-format-v1.md`](docs/design/sidecar-format-v1.md) | Sparse timestamp/offset index format and lifecycle | DRAFT; blocked on offset spike |
 | [`docs/design/unix-json-protocol-v1.md`](docs/design/unix-json-protocol-v1.md) | Socket protocol, framing, methods, streaming, cancellation, limits, and errors | DRAFT |
-| [`docs/benchmarks/reusable-query-baseline.md`](docs/benchmarks/reusable-query-baseline.md) | Existing measurements, benchmark procedure, targets, and regression policy | BASELINE PARTIAL |
+| [`docs/benchmarks/reusable-query-baseline.md`](docs/benchmarks/reusable-query-baseline.md) | Existing measurements, benchmark procedure, targets, and regression policy | M0 BASELINE RECORDED |
 | [`docs/release/reusable-query-rollout.md`](docs/release/reusable-query-rollout.md) | Feature staging, packaging, compatibility, rollback, and operational readiness | DRAFT |
 
 ## Status vocabulary
@@ -54,8 +55,8 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 
 | Milestone | Scope | Status | Entry gate | Exit gate |
 |---|---|---|---|---|
-| M0 | Decisions, semantic characterization, fresh baselines | IN_PROGRESS | G0 passed | G1 |
-| M1 | Compact catalog and `OpenedVcd` | BLOCKED | G1 | G2 |
+| M0 | Decisions, semantic characterization, fresh baselines | DONE | G0 passed | G1 passed |
+| M1 | Compact catalog and `OpenedVcd` | IN_PROGRESS | G1 passed | G2 |
 | M2 | Transport-neutral query engine and compatibility wrappers | BLOCKED | G2 | G3 |
 | M3 | Technical spikes: offsets, snapshot readers, scheduler, serialization | BLOCKED | G3 | G4 |
 | M4 | Experimental bounded Unix-socket server using streaming backend | BLOCKED | G4 | G5 |
@@ -68,7 +69,7 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 | Gate | Decision | Status | Required evidence |
 |---|---|---|---|
 | G0 | Approve product boundary and non-goals | PASSED | Decisions D-001 through D-010 approved by project owner |
-| G1 | Lock current semantics and baseline | OPEN | Characterization suite passes old code; fresh release benchmarks recorded |
+| G1 | Lock current semantics and baseline | PASSED | Reviewer accepted 92 serial Rust tests, 3 Python tests, compatibility contract, and durable `0.1.7` baselines |
 | G2 | Accept compact catalog and snapshot model | BLOCKED | Compatibility green; memory target met; concurrent readers proven |
 | G3 | Accept query-engine refactor | BLOCKED | Old/new differential tests and CLI/Python compatibility green |
 | G4 | Select feasible server and index mechanisms | BLOCKED | All required technical spikes reported |
@@ -96,10 +97,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Complete M0 contract inventory and semantic characterization tests.
-2. Rebuild the current checkout in release mode; the evaluation binary reported `0.1.0` while `Cargo.toml` is `0.1.7`.
-3. Capture a reproducible fresh baseline and decide Gate G1.
-4. Do not start socket, sidecar, or cache implementation before M1/M2 establish a compatible reusable core.
+1. Begin RQ-M1-T01 and T02: file-generation identity/options and compact signal catalog.
+2. Preserve the accepted M0 characterization suite as the differential compatibility boundary.
+3. Use the documented serial test command until M1 reduces catalog memory or test execution is explicitly serialized in CI.
+4. Keep metadata lazy and do not begin socket, sidecar, or cache implementation before the reusable core passes G2/G3.
 
 ## Progress update template
 

@@ -1,0 +1,7 @@
+$timescale 10 ps $end
+$scope module top-scope $end
+$var wire 1 ! sig $end
+$upscope $end
+   $enddefinitions $end   
+#0
+1!

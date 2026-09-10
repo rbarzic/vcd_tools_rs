@@ -1,0 +1,23 @@
+$timescale 1 ns $end
+$scope module top $end
+$var wire 1 " a_common $end
+$var wire 1 ! z_common $end
+$var wire 1 ' only_actual_second $end
+$var wire 1 ( only_actual_first $end
+$var wire 1 % unknown $end
+$var wire 1 & same_time $end
+$upscope $end
+$enddefinitions $end
+#0
+0"
+0!
+0'
+1(
+1%
+0&
+#5
+0"
+#10
+1"
+x&
+0&

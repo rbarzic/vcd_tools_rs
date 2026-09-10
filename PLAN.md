@@ -97,10 +97,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Commit the reviewed T08 portability and deterministic-test changes.
-2. From that clean commit, capture five compact/opened/compatibility samples and five path-list samples for VCD-A using the exact commands in the implementation plan.
-3. Store only verified TSV evidence, summarize the compatibility disposition, and run final G2 review.
-4. Keep socket, sidecar, and cache implementation blocked until the reusable core passes G2/G3.
+1. Run the fresh-context final G2 review over commit `d420347`, clean all-target checks, complete debug/release suites, and verified benchmark artifacts.
+2. If accepted, mark RQ-M1-T08 and M1 `DONE`, pass G2, and unblock M2.
+3. Preserve CR-002: native link/archive/wheel and platform runtime validation remain mandatory at G8/release CI.
+4. Keep socket, sidecar, and cache implementation blocked until the reusable query engine passes G3.
 
 ## Progress update template
 

@@ -147,9 +147,42 @@ Within each `OpenedVcd` process, 100 complete borrowed declaration-order name pa
 
 The complete twelve preview process samples, internal reuse timings, command template, commit/dirty state, VCD SHA-256, environment, filesystem, and cache policy are stored in [`artifacts/m1/catalog-memory-A.tsv`](artifacts/m1/catalog-memory-A.tsv). The helper accepts `CATALOG_RUNS` and emits the durable TSV schema directly. Final T08 evidence requires at least five clean-tree samples and must be stored separately rather than relabeling this preview artifact.
 
-This shows the reusable compact representation reduces peak process RSS by about 80% when consumers avoid legacy materialization and makes repeated borrowed catalog access effectively negligible relative to a 0.5-second reparse. It does **not** pass G2 by itself: existing path APIs still require compatibility conversion in some operations. T07/T08 must complete lazy metadata, final concurrency/compatibility evidence, and resolve or formally accept any remaining one-shot compatibility regression.
+This shows the reusable compact representation reduces peak process RSS by about 80% when consumers avoid legacy materialization and makes repeated borrowed catalog access effectively negligible relative to a 0.5-second reparse. It does **not** pass G2 by itself because it is dirty-tree preview evidence. The clean candidate evidence follows.
 
-## 7. Interpretation
+## 7. M1 G2 clean candidate
+
+Candidate commit: `d420347707b5c3a3e8e56582e82d64a98f332ac1`.
+
+Evidence captured from a clean tree with the VCD-A SHA-256 verified:
+
+- [`artifacts/m1/catalog-memory-A-g2.tsv`](artifacts/m1/catalog-memory-A-g2.tsv)
+- [`artifacts/m1/path-list-A-g2.tsv`](artifacts/m1/path-list-A-g2.tsv)
+- [`artifacts/m1/g2-validation.md`](artifacts/m1/g2-validation.md)
+
+Five alternating samples per catalog mode:
+
+| Mode | Elapsed range | Median | Peak RSS range | Median RSS |
+|---|---:|---:|---:|---:|
+| Compact parse | 0.16–0.18 s | 0.17 s | 78,700–79,000 KiB | 78,920 KiB |
+| `OpenedVcd` borrowed traversal/lookup | 0.18–0.19 s | 0.19 s | 78,708–79,012 KiB | 78,804 KiB |
+| Legacy compatibility materialization | 0.71–0.78 s | 0.74 s | 392,596–393,064 KiB | 392,708 KiB |
+
+The `OpenedVcd` median peak RSS is 79.9% below legacy compatibility materialization, exceeding the provisional 40% reduction target. After open:
+
+- 100 complete borrowed name traversals: 8,394–10,414 µs, median 9,162 µs;
+- 100,000 name lookups: 1,212–1,306 µs, median 1,246 µs.
+
+Five native path-list samples after routing `list` through the compact path:
+
+| Metric | G2 candidate | Accepted M0 reference | Disposition |
+|---|---:|---:|---|
+| Elapsed | 0.16–0.17 s; median 0.16 s | 0.44 s fresh sample; ~0.45 s exploratory median | ~64% lower latency |
+| Peak RSS | 79,056–79,304 KiB | 421,588 KiB fresh sample | ~81% lower peak RSS |
+| Output SHA-256 | `903dd62e7781c84e249b3c304aa6821a9edbf7a18509e88ef63f39ee5a56be7a` | same | verified on all five runs |
+
+The earlier native list regression is resolved. APIs that explicitly request legacy owned `SignalIndex` materialization retain its allocation cost, but reusable consumers and the shipped list command avoid that conversion.
+
+## 8. Interpretation
 
 A header-only persistent process can save about 0.45 seconds per request and avoid repeated allocation churn. For full scans that is approximately:
 
@@ -164,7 +197,7 @@ The server becomes materially valuable when it:
 
 An open file descriptor alone is not expected to improve CPU parsing time.
 
-## 8. Authoritative baseline procedure
+## 9. Authoritative baseline procedure
 
 M0 must run a freshly built checkout:
 
@@ -193,7 +226,7 @@ Record for every run:
 
 Use at least five measured repetitions after one setup run for sub-second operations. Use at least three for multi-second large scans unless cost is prohibitive and documented.
 
-## 9. Exact exploratory command pattern
+## 10. Exact exploratory command pattern
 
 ```sh
 BIN=./target/release/vcd_tools_rs
@@ -230,7 +263,7 @@ timeout 120s /usr/bin/time -f \
 
 Run equivalent commands on VCD-B.
 
-## 10. Required benchmark matrix
+## 11. Required benchmark matrix
 
 | ID | Scenario | Variants | Measurements |
 |---|---|---|---|
@@ -250,7 +283,7 @@ Run equivalent commands on VCD-B.
 | BM-14 | Python iterator | small/large result | time-to-first-row, peak RSS, GIL behavior |
 | BM-15 | Existing CLI regression | list/meta/extract/find/toggle/compare/vcd2trace | wall and output checksum |
 
-## 11. Provisional performance gates
+## 12. Provisional performance gates
 
 These are release gates, not promises. Revisions require measurements and rationale in the implementation plan.
 
@@ -270,7 +303,7 @@ These are release gates, not promises. Revisions require measurements and ration
 | Cancellation | Bounded latency demonstrated during scan, wait, and output backpressure |
 | Python iterator | Memory bounded by configured buffering rather than total result rows |
 
-## 12. Correctness before speed
+## 13. Correctness before speed
 
 Every optimized result is differentially compared to the streaming backend for:
 
@@ -284,7 +317,7 @@ Every optimized result is differentially compared to the streaming backend for:
 
 A faster backend with any unexplained semantic mismatch fails the gate.
 
-## 13. Regression reporting template
+## 14. Regression reporting template
 
 ```text
 Benchmark ID:

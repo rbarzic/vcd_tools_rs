@@ -466,38 +466,19 @@ Completed evidence:
 - Concurrency/snapshot evidence from T04–T07 covers eight concurrent independent parsers, one metadata scan across sixteen concurrent callers, immutable shared results, configured-symlink retargeting, atomic replacement, append/truncate/in-place mutation, complete-header mutation outside bounded samples, and pre-publication validation.
 - Compatibility behavior remains protected by the accepted M0 semantic, CLI, Python-console, and integration suites. The reusable list path avoids legacy `SignalIndex` materialization; final clean-tree path-list measurements remain required to disposition the previous cold compatibility latency regression.
 
-Remaining before G2:
+Final clean candidate evidence:
 
-1. Commit the T08 code/test portability changes so the benchmark revision is identifiable and the tree can be clean.
-2. From that clean commit, rerun `cargo check --all-targets` for the host and four installed release targets, recording the exact commit/results per CR-002.
-3. Capture at least five alternating compact/opened/compatibility samples and five path-list samples for VCD-A with expected input/output hashes.
-4. Store those records separately under `docs/benchmarks/artifacts/m1/`; do not relabel dirty preview evidence.
-5. Run final fresh-context G2 review over the committed code and clean evidence.
+- Code candidate commit: `d420347707b5c3a3e8e56582e82d64a98f332ac1`.
+- `cargo check --all-targets` passed from a clean tree for Linux x64, Linux ARM64, Windows x64 MSVC, macOS Intel, and macOS ARM64. Per CR-002, native linking/packaging remains G8 release-CI evidence.
+- Complete debug and release suites each passed 133 Rust tests with 3 diagnostics ignored; 3 Python console tests and `cargo doc --no-deps` passed.
+- `docs/benchmarks/artifacts/m1/catalog-memory-A-g2.tsv` contains five alternating samples per mode with `git_dirty=false`, `evidence_status=g2_candidate`, exact commit, and verified VCD-A SHA-256.
+- `OpenedVcd` median peak RSS is 78,804 KiB versus 392,708 KiB for legacy materialization, a 79.9% reduction that exceeds the 40% target.
+- Borrowed traversal/lookup medians are 9,162 µs for 100 complete catalog traversals and 1,246 µs for 100,000 name lookups after open.
+- `docs/benchmarks/artifacts/m1/path-list-A-g2.tsv` contains five zero-status samples with the accepted M0 output hash verified on every run.
+- Native filtered list improved from the accepted ~0.45 s baseline to a 0.16 s median and from 421,588 KiB to approximately 79,208 KiB median peak RSS after routing the CLI through the compact path.
+- Full commands/results and the CR-002 scope are summarized in `docs/benchmarks/artifacts/m1/g2-validation.md` and `docs/benchmarks/reusable-query-baseline.md`.
 
-Exact clean-tree commands for the supervisor:
-
-```sh
-test -z "$(git status --porcelain)"
-A=/home/roba/work/gitlab/icdesign/chips/polaris-hw/sim/ctests/cp1_cp2_payload_006/tb.vcd
-A_SHA=8b5a3791ad8d4232e637fd16edba9618cd0370eb66d3d7e1d780f82531c8f4ac
-mkdir -p /tmp/vcd-tools-t08
-CATALOG_EVIDENCE_STATUS=g2_candidate \
-CATALOG_RUNS=5 scripts/measure-catalog-memory.sh "$A" \
-  > /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
-grep -F $'evidence_status\tg2_candidate' /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
-grep -F $'git_dirty\tfalse' /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
-grep -F $'vcd_sha256\t'"$A_SHA" /tmp/vcd-tools-t08/catalog-memory-A-clean.tsv
-
-cargo build --release
-BENCH_RUNS=5 \
-BENCH_ARTIFACT_DIR=/tmp/vcd-tools-t08/path-list \
-BENCH_LABEL=path-list-A-clean \
-BENCH_EXPECT_VCD_SHA256="$A_SHA" \
-BENCH_EXPECT_SHA256=903dd62e7781c84e249b3c304aa6821a9edbf7a18509e88ef63f39ee5a56be7a \
-scripts/bench-vcd.sh "$A" list --filter cache_clk
-```
-
-The supervisor should verify all five statuses/hashes, then copy only the TSV records (not large stdout files) into the repository and summarize medians/ranges in `docs/benchmarks/reusable-query-baseline.md`.
+Remaining before G2: one fresh-context final gate review. Do not mark T08/G2 complete until that review accepts the evidence.
 
 ## Gate G2 — Core representation and snapshot
 

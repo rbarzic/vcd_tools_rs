@@ -1,0 +1,34 @@
+record	value
+schema	vcd_catalog_memory_v1
+evidence_status	g2_candidate
+git_commit	d420347707b5c3a3e8e56582e82d64a98f332ac1
+git_dirty	false
+rustc	rustc 1.93.1 (01f6ddf75 2026-02-11);binary: rustc;commit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf;commit-date: 2026-02-11;host: x86_64-unknown-linux-gnu;release: 1.93.1;LLVM version: 21.1.8;
+uname	Linux onio-ws13 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Mon May 11 10:30:58 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+cpu	12th Gen Intel(R) Core(TM) i9-12900K
+memory_kib	65577852
+filesystem	ext4   /dev/nvme0n1p2 /
+vcd_path	/home/roba/work/gitlab/icdesign/chips/polaris-hw/sim/ctests/cp1_cp2_payload_006/tb.vcd
+vcd_size_bytes	4589561612
+vcd_mtime	2026-08-28 09:46:46.061641555 +0200
+vcd_sha256	8b5a3791ad8d4232e637fd16edba9618cd0370eb66d3d7e1d780f82531c8f4ac
+cache_policy	uncontrolled; page cache not dropped; compact/opened/compatibility alternate per run
+runs_per_mode	5
+test_binary	/home/roba/work/github/vcd_tools_rs/target/release/deps/vcd_tools_rs-45eb8ae09d5cb014
+command_template	VCD_CATALOG_PROBE=<vcd> /usr/bin/time <test-binary> --exact <module>::tests::probe_<mode>_peak_rss --ignored --nocapture
+sample	mode	run	elapsed_s	user_s	system_s	max_rss_kib	probe_summary
+sample	compact	1	0.18	0.14	0.03	78952	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	opened	1	0.19	0.15	0.03	78804	mode=opened signals=193730 listed_bytes=16428562 lookup=tb.tb_finish_ok estimated_catalog_bytes=36562701 repeated_list_100_us=10414 repeated_lookup_100000_us=1246
+sample	compatibility	1	0.75	0.60	0.14	392708	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850
+sample	compact	2	0.17	0.14	0.02	78852	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	opened	2	0.19	0.15	0.03	78708	mode=opened signals=193730 listed_bytes=16428562 lookup=tb.tb_finish_ok estimated_catalog_bytes=36562701 repeated_list_100_us=9260 repeated_lookup_100000_us=1226
+sample	compatibility	2	0.78	0.63	0.15	392612	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850
+sample	compact	3	0.17	0.16	0.01	78920	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	opened	3	0.19	0.16	0.02	78976	mode=opened signals=193730 listed_bytes=16428562 lookup=tb.tb_finish_ok estimated_catalog_bytes=36562701 repeated_list_100_us=9654 repeated_lookup_100000_us=1212
+sample	compatibility	3	0.74	0.60	0.13	392924	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850
+sample	compact	4	0.17	0.15	0.01	78700	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	opened	4	0.18	0.15	0.02	78800	mode=opened signals=193730 listed_bytes=16428562 lookup=tb.tb_finish_ok estimated_catalog_bytes=36562701 repeated_list_100_us=8394 repeated_lookup_100000_us=1306
+sample	compatibility	4	0.72	0.56	0.15	392596	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850
+sample	compact	5	0.17	0.14	0.02	79000	mode=compact signals=193730 estimated_catalog_bytes=36562701 estimated_bytes_per_signal=188.73
+sample	opened	5	0.18	0.15	0.02	79012	mode=opened signals=193730 listed_bytes=16428562 lookup=tb.tb_finish_ok estimated_catalog_bytes=36562701 repeated_list_100_us=9162 repeated_lookup_100000_us=1268
+sample	compatibility	5	0.71	0.58	0.13	393064	mode=compatibility signals=193730 owned_signals=193730 by_name=193730 by_id=158850

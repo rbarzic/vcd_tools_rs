@@ -24,9 +24,11 @@ def test_exported_module_functions_and_signatures_are_stable():
         "list_signals",
         "metadata",
         "toggles",
+        "serve",
     ]
     assert str(inspect.signature(vcd_tools.list_signals)) == "(path, filter=None)"
     assert str(inspect.signature(vcd_tools.metadata)) == "(path)"
+    assert str(inspect.signature(vcd_tools.serve)).startswith("(path, socket,")
     assert str(inspect.signature(vcd_tools.extract)) == "(path, signals, start=None, end=None)"
     assert str(inspect.signature(vcd_tools.toggles)) == "(path, signals, start=None, end=None)"
     assert str(inspect.signature(vcd_tools.find)) == (

@@ -36,7 +36,7 @@ fn golden_requests_decode_and_encode_exactly() {
 fn golden_responses() -> Vec<ResponseFrame> {
     let ping = PingResult {
         protocol: "1".into(),
-        package_version: "0.1.7".into(),
+        package_version: env!("CARGO_PKG_VERSION").into(),
         uptime_ms: "1234".into(),
         ready: true,
     };
@@ -67,7 +67,7 @@ fn golden_responses() -> Vec<ResponseFrame> {
         },
         distribution: DistributionCapabilities {
             native_serve: true,
-            python_console_serve: false,
+            python_console_serve: true,
         },
     };
     let metadata = MetadataResult {

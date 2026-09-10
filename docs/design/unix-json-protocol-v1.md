@@ -56,7 +56,7 @@ It also advertises cache methods before a cache exists and says the subcommand-v
 - Entry point: `vcd_tools_rs serve <VCD> --socket <PATH>`.
 - No dedicated server binary in v1.
 - On non-Unix targets, Unix server modules/dependencies are target-gated; existing library and native binaries continue to build. The `serve` variant may be absent on non-Unix.
-- **Distribution freeze:** v1 server mode is supported from source builds and native Linux/macOS release archives only. The pip-installed Python console does not expose `serve` in v1. Documentation must state this prominently. Wheel-native server packaging is a later release task.
+- **Distribution freeze:** v1 server mode is supported from source builds, native Linux/macOS archives, and Unix PyPI wheels. The pip-installed `vcd_tools_rs serve` command calls the compiled extension. Windows wheels do not expose `serve`.
 - Clients never supply the primary VCD path.
 
 ### 2. JSON Lines framing
@@ -139,7 +139,7 @@ Params: `{}`.
 Result:
 
 ```json
-{"protocol":"1","package_version":"0.1.7","uptime_ms":"1234","ready":true}
+{"protocol":"1","package_version":"0.1.8","uptime_ms":"1234","ready":true}
 ```
 
 #### `describe`
@@ -183,7 +183,7 @@ Result includes:
   },
   "distribution":{
     "native_serve":true,
-    "python_console_serve":false
+    "python_console_serve":true
   }
 }
 ```
@@ -423,11 +423,11 @@ The thread/channel versus async implementation remains T04’s decision; this pr
 - Float `bits` exposes exact engine `f64` representation but not original VCD lexical spelling; documentation must distinguish semantic from lexical fidelity.
 - Streaming is not rollback-capable. The `complete:false` contract relies on clients honoring “discard prior chunks”; examples and client fixture must enforce this.
 - Complete header/sample generation validation adds fixed work per query. Scheduler benchmarks must include that cost.
-- Pip users may assume the existing console supports `serve`; failure to document native-only availability will be a product regression even if the protocol is correct.
+- Unix wheel and native-console users may both invoke `serve`; release tests must keep their options and behavior aligned.
 - A 120-second default can still reject unusual multi-gigabyte scans; operators can raise the server maximum explicitly, while clients may only lower it.
 
 ## Accepted consequential clarifications
 
-1. Server mode is native binary/source distribution only in v1, not the pip Python console.
+1. Server mode is available through the native binary and the pip Python console on Unix; Windows does not expose the Unix server.
 2. The value schema is tagged `integer|float|text`, with exact float bits and event width; no `value_text` or aligned-extraction alternative exists in v1.
 3. M4 must add golden JSONL fixtures before listener/service integration.

@@ -1300,12 +1300,12 @@ Follow [`../benchmarks/reusable-query-baseline.md`](../benchmarks/reusable-query
 | Change ID | `CR-003` |
 | Owner/approval | Supervising implementation authority; proposed from RQ-M3-T05 for G4 review |
 | Affected tasks | `RQ-M3-T05`, M4 server implementation, G5, G8 packaging |
-| Clarification | V1 is the native Unix `vcd_tools_rs serve` subcommand from source/native archives; the pip Python console does not expose server mode |
+| Clarification | V1 is available through the native Unix `vcd_tools_rs serve` subcommand and the pip-installed console on Unix; Windows does not expose Unix sockets |
 | Frozen value/extract schema | Tagged `integer|float|text` values, exact float bits, event width, event-only extraction, decimal strings for waveform/count/limit data |
 | Frozen initial methods | `ping`, `describe`, streamed `list`, `metadata`, streamed `extract`, `find`, `toggles`, `cancel`; compare/cache/shutdown/aligned output are not advertised |
 | Limits/accounting | Engine logical bytes and socket encoded bytes are independent; bounded frame/request/queue/connection defaults are normative for M4 golden fixtures |
 | Evidence | `docs/design/unix-json-protocol-v1.md` and `docs/benchmarks/artifacts/m3/scheduler-spike.md` |
-| Compatibility impact | Additive native server interface only; existing CLI query and Python module behavior is unchanged |
+| Compatibility impact | Additive Unix server interface in both native and pip consoles; existing query and Python module behavior is unchanged |
 | Rollback | Defer M4 and retain the reusable query engine without a server transport |
 | Status | `APPROVED AT G4` |
 

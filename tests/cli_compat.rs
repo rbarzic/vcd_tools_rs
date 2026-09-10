@@ -23,7 +23,10 @@ fn stderr(output: &Output) -> String {
 fn version_matches_package_version() {
     let output = run(&["--version"]);
     assert!(output.status.success());
-    assert_eq!(stdout(&output), "vcd_tools_rs 0.1.7\n");
+    assert_eq!(
+        stdout(&output),
+        format!("vcd_tools_rs {}\n", env!("CARGO_PKG_VERSION"))
+    );
     assert!(stderr(&output).is_empty());
 }
 

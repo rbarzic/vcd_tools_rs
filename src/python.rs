@@ -1,12 +1,20 @@
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::path::Path;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+#[cfg(unix)]
+use crate::server::app::run_server_until_signal;
+#[cfg(unix)]
+use crate::server::runtime::RuntimeConfig;
+#[cfg(unix)]
+use crate::server::service::ServiceConfig;
 use crate::{
-    compare_vcd_files, count_toggles, extract_time_values_from_file, find_nth_occurrence,
-    list_signals_from_file, parse_target_value, read_vcd_metadata, ComparisonOptions, TimeWindow,
+    ComparisonOptions, TimeWindow, compare_vcd_files, count_toggles, extract_time_values_from_file,
+    find_nth_occurrence, list_signals_from_file, parse_target_value, read_vcd_metadata,
 };
 
 fn to_py(e: crate::VcdError) -> PyErr {
@@ -41,7 +49,8 @@ fn metadata(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     d.set_item("end_time", meta.end_time)?;
     d.set_item(
         "timescale",
-        meta.timescale.map(|t| format!("{} {}", t.magnitude, t.unit)),
+        meta.timescale
+            .map(|t| format!("{} {}", t.magnitude, t.unit)),
     )?;
     Ok(d.unbind().into_any())
 }
@@ -217,6 +226,67 @@ fn find(
     Ok(d.unbind().into_any())
 }
 
+#[cfg(unix)]
+#[pyfunction]
+#[pyo3(signature = (
+    path,
+    socket,
+    workers=4,
+    queue_depth=64,
+    max_connections=32,
+    max_active_requests=8,
+    output_chunks=8,
+    max_request_bytes=1_048_576,
+    max_frame_bytes=262_144,
+    max_timeout_ms=120_000,
+    max_signals=4_096,
+    max_rows=1_000_000,
+    max_response_bytes=268_435_456,
+    max_commands=1_000_000_000
+))]
+#[allow(clippy::too_many_arguments)]
+fn serve(
+    py: Python<'_>,
+    path: &str,
+    socket: &str,
+    workers: usize,
+    queue_depth: usize,
+    max_connections: usize,
+    max_active_requests: usize,
+    output_chunks: usize,
+    max_request_bytes: usize,
+    max_frame_bytes: usize,
+    max_timeout_ms: u64,
+    max_signals: usize,
+    max_rows: u64,
+    max_response_bytes: u64,
+    max_commands: u64,
+) -> PyResult<()> {
+    if !Path::new(socket).is_absolute() {
+        return Err(PyRuntimeError::new_err("socket path must be absolute"));
+    }
+    let path = path.to_owned();
+    let socket = socket.to_owned();
+    let runtime = RuntimeConfig {
+        max_connections,
+        max_active_requests_per_connection: max_active_requests,
+        workers,
+        queue_depth,
+        output_chunks,
+        request_line_bytes: max_request_bytes,
+        max_encoded_frame_bytes: max_frame_bytes,
+        max_timeout_ms,
+    };
+    let service = ServiceConfig {
+        max_signals,
+        max_rows,
+        max_response_bytes,
+        max_commands,
+    };
+    py.allow_threads(move || run_server_until_signal(path, socket, runtime, service))
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+}
+
 #[pymodule]
 fn vcd_tools(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_signals, m)?)?;
@@ -225,5 +295,7 @@ fn vcd_tools(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(toggles, m)?)?;
     m.add_function(wrap_pyfunction!(find, m)?)?;
     m.add_function(wrap_pyfunction!(compare, m)?)?;
+    #[cfg(unix)]
+    m.add_function(wrap_pyfunction!(serve, m)?)?;
     Ok(())
 }

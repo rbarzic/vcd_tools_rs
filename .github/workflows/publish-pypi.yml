@@ -79,10 +79,52 @@ jobs:
     permissions:
       id-token: write   # required for Trusted Publisher (OIDC)
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: wheels-*
           merge-multiple: true
           path: dist
+      - name: Smoke-test Linux wheel and server command
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -type f -name '*manylinux*x86_64.whl' | head -1)
+          test -n "$wheel"
+          python3 -m venv /tmp/vcd-wheel-smoke
+          /tmp/vcd-wheel-smoke/bin/pip install "$wheel"
+          /tmp/vcd-wheel-smoke/bin/python -c 'import vcd_tools; assert hasattr(vcd_tools, "serve")'
+          dir=$(mktemp -d)
+          chmod 700 "$dir"
+          socket="$dir/server.sock"
+          /tmp/vcd-wheel-smoke/bin/vcd_tools_rs serve \
+            tests/fixtures/query_semantics.vcd --socket "$socket" &
+          pid=$!
+          cleanup() {
+            kill -TERM "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            rm -rf "$dir"
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 150); do
+            test -S "$socket" && break
+            kill -0 "$pid"
+            sleep 0.02
+          done
+          test -S "$socket"
+          /tmp/vcd-wheel-smoke/bin/python - "$socket" <<'PY'
+          import json, socket, sys
+          client = socket.socket(socket.AF_UNIX)
+          client.connect(sys.argv[1])
+          client.sendall(b'{"v":1,"id":"wheel","method":"ping","params":{}}\n')
+          reply = json.loads(client.makefile().readline())
+          assert reply["result"]["ready"] is True, reply
+          assert reply["result"]["package_version"] == "0.1.8", reply
+          PY
+          kill -TERM "$pid"
+          wait "$pid"
+          test ! -e "$socket"
+          trap - EXIT
+          rm -rf "$dir"
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

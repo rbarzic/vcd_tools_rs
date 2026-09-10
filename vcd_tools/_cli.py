@@ -244,12 +244,33 @@ def cmd_compare(args):
     print()
 
 
+def cmd_serve(args):
+    from vcd_tools import serve
+
+    serve(
+        args.vcd,
+        args.socket,
+        workers=args.workers,
+        queue_depth=args.queue_depth,
+        max_connections=args.max_connections,
+        max_active_requests=args.max_active_requests,
+        output_chunks=args.output_chunks,
+        max_request_bytes=args.max_request_bytes,
+        max_frame_bytes=args.max_frame_bytes,
+        max_timeout_ms=args.max_timeout_ms,
+        max_signals=args.max_signals,
+        max_rows=args.max_rows,
+        max_response_bytes=args.max_response_bytes,
+        max_commands=args.max_commands,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="vcd_tools_rs",
         description="VCD file analysis tools",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.7")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1.8")
     parser.add_argument("--log-level",
                         default="info",
                         choices=["error", "warn", "info", "debug"],
@@ -310,6 +331,24 @@ def main():
     p.add_argument("--output", choices=["default", "json", "compact"],
                    help="Output format (default, json, compact)")
 
+    # Native Unix server exposed by the compiled extension.
+    if sys.platform != "win32":
+        p = sub.add_parser("serve", help="Serve one VCD over an owner-only Unix socket")
+        p.add_argument("vcd")
+        p.add_argument("--socket", required=True)
+        p.add_argument("--workers", type=int, default=4)
+        p.add_argument("--queue-depth", type=int, default=64)
+        p.add_argument("--max-connections", type=int, default=32)
+        p.add_argument("--max-active-requests", type=int, default=8)
+        p.add_argument("--output-chunks", type=int, default=8)
+        p.add_argument("--max-request-bytes", type=int, default=1_048_576)
+        p.add_argument("--max-frame-bytes", type=int, default=262_144)
+        p.add_argument("--max-timeout-ms", type=int, default=120_000)
+        p.add_argument("--max-signals", type=int, default=4_096)
+        p.add_argument("--max-rows", type=int, default=1_000_000)
+        p.add_argument("--max-response-bytes", type=int, default=268_435_456)
+        p.add_argument("--max-commands", type=int, default=1_000_000_000)
+
     args = parser.parse_args()
 
     dispatch = {
@@ -319,6 +358,7 @@ def main():
         "toggle": cmd_toggle,
         "find": cmd_find,
         "compare": cmd_compare,
+        "serve": cmd_serve,
     }
     try:
         dispatch[args.command](args)

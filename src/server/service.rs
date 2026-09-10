@@ -497,7 +497,7 @@ impl VcdService {
             },
             distribution: DistributionCapabilities {
                 native_serve: true,
-                python_console_serve: false,
+                python_console_serve: true,
             },
         }
     }

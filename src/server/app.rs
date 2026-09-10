@@ -21,6 +21,21 @@ pub enum ServerEvent {
     ConnectionFinished,
 }
 
+pub fn run_server_until_signal(
+    vcd: impl AsRef<Path>,
+    socket: impl AsRef<Path>,
+    runtime: RuntimeConfig,
+    service: ServiceConfig,
+) -> io::Result<()> {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let signal_shutdown = Arc::clone(&shutdown);
+    ctrlc::set_handler(move || {
+        signal_shutdown.store(true, Ordering::Release);
+    })
+    .map_err(|error| io::Error::other(format!("failed to install signal handler: {error}")))?;
+    run_server(vcd, socket, runtime, service, shutdown)
+}
+
 pub fn run_server(
     vcd: impl AsRef<Path>,
     socket: impl AsRef<Path>,

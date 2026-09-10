@@ -290,7 +290,7 @@ vcd_tools_rs compare reference.vcd actual.vcd --start 0 --end 1000000
 
 Run the experimental native Unix-domain query server for one VCD.
 
-> `serve` is available only in the native Linux/macOS Rust binary. The pip-installed Python console does not expose this command in protocol v1.
+> `serve` is available in native Linux/macOS builds and through the pip-installed console on Unix. Windows does not expose Unix socket server mode.
 
 **Usage:**
 ```sh

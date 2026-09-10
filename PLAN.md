@@ -98,10 +98,10 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Commit and smoke the runnable native Unix server MVP.
-2. Keep T10/G5 long soak, peer-credential hardening, native macOS runtime, and packaging explicitly deferred.
+1. Commit, tag, and push release `v0.1.8` after native and wheel smoke checks.
+2. Keep T10/G5 long soak, peer-credential hardening, and native macOS runtime explicitly deferred.
 3. Do not add sidecar/cache/compare/shutdown methods to protocol v1.
-4. Preserve native-only server distribution; the pip console does not expose `serve`.
+4. Publish Unix server mode through both the native binary and Unix PyPI console; Windows remains unsupported for Unix sockets.
 
 ## Progress update template
 

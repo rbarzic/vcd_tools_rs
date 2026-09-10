@@ -1,6 +1,6 @@
 [package]
 name = "vcd_tools_rs"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 authors = ["Ronan Barzic <rbarzic@gmail.com>"]
 license = "MIT"

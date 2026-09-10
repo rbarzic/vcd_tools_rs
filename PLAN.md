@@ -30,7 +30,7 @@ Recommended v1 product boundary:
 
 | Document | Purpose | Status |
 |---|---|---|
-| [`docs/plans/reusable-query-implementation-plan.md`](docs/plans/reusable-query-implementation-plan.md) | Work breakdown, dependencies, task status, acceptance criteria, validation, risks, and gates | APPROVED; M1 IN PROGRESS |
+| [`docs/plans/reusable-query-implementation-plan.md`](docs/plans/reusable-query-implementation-plan.md) | Work breakdown, dependencies, task status, acceptance criteria, validation, risks, and gates | APPROVED; M2 IN PROGRESS |
 | [`docs/design/current-compatibility-contract.md`](docs/design/current-compatibility-contract.md) | Characterized Rust, native CLI, Python, trace, packaging, errors, and semantic compatibility boundary | ACCEPTED AT G1 |
 | [`docs/design/reusable-query-architecture.md`](docs/design/reusable-query-architecture.md) | Core ownership, data model, semantics, query backends, invalidation, and compatibility | DRAFT |
 | [`docs/design/sidecar-format-v1.md`](docs/design/sidecar-format-v1.md) | Sparse timestamp/offset index format and lifecycle | DRAFT; blocked on offset spike |
@@ -56,8 +56,8 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 | Milestone | Scope | Status | Entry gate | Exit gate |
 |---|---|---|---|---|
 | M0 | Decisions, semantic characterization, fresh baselines | DONE | G0 passed | G1 passed |
-| M1 | Compact catalog and `OpenedVcd` | IN_PROGRESS | G1 passed | G2 |
-| M2 | Transport-neutral query engine and compatibility wrappers | BLOCKED | G2 | G3 |
+| M1 | Compact catalog and `OpenedVcd` | DONE | G1 passed | G2 passed |
+| M2 | Transport-neutral query engine and compatibility wrappers | IN_PROGRESS | G2 passed | G3 |
 | M3 | Technical spikes: offsets, snapshot readers, scheduler, serialization | BLOCKED | G3 | G4 |
 | M4 | Experimental bounded Unix-socket server using streaming backend | BLOCKED | G4 | G5 |
 | M5 | Sparse persistent sidecar | BLOCKED | Offset spike approved | G6 |
@@ -70,7 +70,7 @@ A task is not `DONE` until its acceptance criteria pass and evidence is linked f
 |---|---|---|---|
 | G0 | Approve product boundary and non-goals | PASSED | Decisions D-001 through D-010 approved by project owner |
 | G1 | Lock current semantics and baseline | PASSED | Reviewer accepted 92 serial Rust tests, 3 Python tests, compatibility contract, and durable `0.1.7` baselines |
-| G2 | Accept compact catalog and snapshot model | BLOCKED | Compatibility green; memory target met; concurrent readers proven |
+| G2 | Accept compact catalog and snapshot model | PASSED | Reviewer accepted T08, 79.9% RSS reduction, faster native list, concurrency/snapshot tests, and CR-002 all-target checks |
 | G3 | Accept query-engine refactor | BLOCKED | Old/new differential tests and CLI/Python compatibility green |
 | G4 | Select feasible server and index mechanisms | BLOCKED | All required technical spikes reported |
 | G5 | Ship experimental streaming server | BLOCKED | Protocol, limits, cancellation, security, soak, portability pass |
@@ -97,9 +97,9 @@ Update the `Status`, `Decision`, and `Evidence` columns; do not silently change 
 
 ## Immediate next actions
 
-1. Run the fresh-context final G2 review over commit `d420347`, clean all-target checks, complete debug/release suites, and verified benchmark artifacts.
-2. If accepted, mark RQ-M1-T08 and M1 `DONE`, pass G2, and unblock M2.
-3. Preserve CR-002: native link/archive/wheel and platform runtime validation remain mandatory at G8/release CI.
+1. Begin RQ-M2-T01: transport-neutral query context, limits, cancellation, and internal error model.
+2. Then implement T02/T03: selected-ID-first streaming decoder and reusable extraction iterator.
+3. Preserve the accepted M0 compatibility suite and M1 generation/completion-validation guarantees.
 4. Keep socket, sidecar, and cache implementation blocked until the reusable query engine passes G3.
 
 ## Progress update template

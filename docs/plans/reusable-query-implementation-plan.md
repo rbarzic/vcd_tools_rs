@@ -248,9 +248,9 @@ Pass only when:
 
 # M1 — Compact catalog and `OpenedVcd`
 
-Milestone status: `IN_PROGRESS`
+Milestone status: `DONE`
 Entry: Gate G1 passed
-Exit: Gate G2
+Exit: Gate G2 passed
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
@@ -261,7 +261,7 @@ Exit: Gate G2
 | RQ-M1-T05 | DONE | T04 | Implement independent generation-validated readers |
 | RQ-M1-T06 | DONE | T04 | Add borrowed `SignalRef` and owned compatibility conversion |
 | RQ-M1-T07 | DONE | T04,T05 | Add lazy metadata single-flight state |
-| RQ-M1-T08 | IN_REVIEW | T02-T07 | Concurrency, memory, lookup, and compatibility evidence |
+| RQ-M1-T08 | DONE | T02-T07 | Concurrency, memory, lookup, and compatibility evidence |
 
 ## RQ-M1-T01 — Identity and options
 
@@ -454,7 +454,7 @@ Scope remains T07 only. G2 remains open for T08 clean-tree performance, availabl
 
 ## M1 final-gate evidence preparation (RQ-M1-T08)
 
-Current status: **IN REVIEW / CLEAN BENCHMARKS PENDING**.
+Current status: **ACCEPTED / G2 PASSED**.
 
 Completed evidence:
 
@@ -473,14 +473,23 @@ Final clean candidate evidence:
 - Complete debug and release suites each passed 133 Rust tests with 3 diagnostics ignored; 3 Python console tests and `cargo doc --no-deps` passed.
 - `docs/benchmarks/artifacts/m1/catalog-memory-A-g2.tsv` contains five alternating samples per mode with `git_dirty=false`, `evidence_status=g2_candidate`, exact commit, and verified VCD-A SHA-256.
 - `OpenedVcd` median peak RSS is 78,804 KiB versus 392,708 KiB for legacy materialization, a 79.9% reduction that exceeds the 40% target.
-- Borrowed traversal/lookup medians are 9,162 µs for 100 complete catalog traversals and 1,246 µs for 100,000 name lookups after open.
+- Borrowed traversal/lookup medians are 9,260 µs for 100 complete catalog traversals and 1,246 µs for 100,000 name lookups after open.
 - `docs/benchmarks/artifacts/m1/path-list-A-g2.tsv` contains five zero-status samples with the accepted M0 output hash verified on every run.
 - Native filtered list improved from the accepted ~0.45 s baseline to a 0.16 s median and from 421,588 KiB to approximately 79,208 KiB median peak RSS after routing the CLI through the compact path.
 - Full commands/results and the CR-002 scope are summarized in `docs/benchmarks/artifacts/m1/g2-validation.md` and `docs/benchmarks/reusable-query-baseline.md`.
 
-Remaining before G2: one fresh-context final gate review. Do not mark T08/G2 complete until that review accepts the evidence.
+Reviewer gate decision:
+
+- RQ-M1-T08: `DONE`;
+- Gate G2: `PASSED`;
+- Milestone M1: `DONE`;
+- M2 may proceed;
+- non-blocking correction applied: borrowed traversal median is 9,260 µs;
+- CR-002 G8 native link/archive/wheel/runtime obligations remain mandatory.
 
 ## Gate G2 — Core representation and snapshot
+
+Current status: **PASSED**.
 
 Pass when:
 
@@ -495,12 +504,13 @@ Pass when:
 
 # M2 — Transport-neutral query engine and compatibility wrappers
 
-Milestone status: `BLOCKED` on G2
+Milestone status: `IN_PROGRESS`
+Entry: Gate G2 passed
 Exit: Gate G3
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M2-T01 | BLOCKED | G2 | Query context, limits, cancellation, internal error model |
+| RQ-M2-T01 | READY | G2 | Query context, limits, cancellation, internal error model |
 | RQ-M2-T02 | BLOCKED | T01 | Streaming backend with target check before conversion |
 | RQ-M2-T03 | BLOCKED | T02 | Reusable extraction iterator |
 | RQ-M2-T04 | BLOCKED | T03 | Reusable find and toggle |

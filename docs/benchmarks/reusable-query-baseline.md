@@ -169,7 +169,7 @@ Five alternating samples per catalog mode:
 
 The `OpenedVcd` median peak RSS is 79.9% below legacy compatibility materialization, exceeding the provisional 40% reduction target. After open:
 
-- 100 complete borrowed name traversals: 8,394–10,414 µs, median 9,162 µs;
+- 100 complete borrowed name traversals: 8,394–10,414 µs, median 9,260 µs;
 - 100,000 name lookups: 1,212–1,306 µs, median 1,246 µs.
 
 Five native path-list samples after routing `list` through the compact path:

@@ -1,8 +1,8 @@
 # Sparse Sidecar Format v1
 
-Status: **DRAFT — NOT IMPLEMENTATION-APPROVED**  
-Plan: **VCD-RQ-001**  
-Blocked by: parser offset/resume spike (`RQ-M3-T02`)
+Status: **OFFSET MECHANISM APPROVED; FORMAT IMPLEMENTATION REMAINS M5/G6**
+Plan: **VCD-RQ-001**
+Evidence: [`../benchmarks/artifacts/m3/offset-spike.md`](../benchmarks/artifacts/m3/offset-spike.md)
 
 ## 1. Scope
 
@@ -19,32 +19,20 @@ It is not:
 
 Deletion or rejection of a sidecar always falls back to normal streaming unless policy says indexing is required.
 
-## 2. Correctness precondition
+## 2. Proven offset mechanism
 
-Before implementing this format, an executable spike must prove that the selected offset is the logical start of a timestamp command and that a fresh parser can resume there.
+The M3 executable spike proved that `parser.reader().stream_position()` captured immediately before parsing a `Command::Timestamp` is a safe fresh-parser boundary. Full command suffixes matched across semantic fixtures, CRLF, repeated/decreasing timestamps, dump-control blocks, an 8 KiB buffer boundary, multiple fresh reader capacities, and sampled prefixes of both supplied large VCDs.
 
-Required experiment:
+Mandatory guards discovered by the spike:
 
-1. Before each parser `next()`, obtain the logical stream position from the parser's buffered reader.
-2. Parse the command.
-3. When it is a timestamp, record the prior position and timestamp.
-4. For every recorded checkpoint, create a fresh reader at that position.
-5. Compare all subsequent commands against a full parse, including command kind, ID, value, timestamp, and order.
+1. Track `Command::Begin`/`Command::End` simulation-command state and never record a timestamp while inside `$dump* ... $end`. The parser has private state that cannot be reconstructed by seeking into such a block.
+2. Detect any decreasing timestamp during index construction. Mark sparse seek unavailable for that generation and fall back to body-start streaming; never sort or binary-search non-monotonic checkpoints.
+3. For repeated equal timestamps, retain the earliest safe offset in the equal-time run.
+4. Keep the mandatory body-start checkpoint.
+5. Use the logical safe offset even when parser whitespace precedes the exact `#`; an exact hash-character offset provides no demonstrated benefit.
+6. Seek only an independently generation-validated `OpenedBodyReader`.
 
-Fixtures must include:
-
-- LF and CRLF;
-- blank lines and varied whitespace;
-- `$dumpvars` and changes before the first timestamp;
-- multiple timestamp commands and repeated timestamps;
-- scalar/vector/real/string changes;
-- large vectors and X/Z;
-- comments and dump-control commands in the body;
-- unusual formatting around `$enddefinitions`;
-- parser buffer boundaries;
-- both supplied large VCDs using sampled checkpoints.
-
-Do not use the underlying `File` cursor position: buffered read-ahead makes it unsuitable. If logical positions cannot be proven safe, either implement a dedicated byte-level checkpoint scanner with differential tests or defer sparse seek from v1.
+The permanent M5 suite must reproduce the spike cases, including a timestamp-inside-dump negative fixture. A custom byte-level scanner is not required.
 
 ## 3. Checkpoint semantics
 
@@ -54,7 +42,7 @@ Every checkpoint is:
 (timestamp, file_offset)
 ```
 
-`file_offset` points to the beginning of the corresponding timestamp command, not the first value change after it. Parsing the timestamp restores the current time naturally.
+`file_offset` is the parser-safe logical stream position captured before the corresponding timestamp command. It may precede the exact `#` by parser whitespace, which a fresh parser safely consumes. Parsing the timestamp restores current time naturally.
 
 The index also contains a mandatory body-start checkpoint:
 
@@ -62,15 +50,17 @@ The index also contains a mandatory body-start checkpoint:
 (timestamp = 0, file_offset = body_offset, kind = BODY_START)
 ```
 
-This ensures pre-first-timestamp changes and initial dump blocks remain reachable for windows starting at zero.
+This ensures pre-first-timestamp changes and initial dump blocks remain reachable for windows starting at zero. `BODY_START` is the only stored timestamp-zero checkpoint: the builder must not publish a separate timestamp-command checkpoint for `#0`. Therefore every `start=0` lookup deterministically begins at `body_offset`.
 
 For `window.start = t`:
 
-1. choose the greatest timestamp checkpoint with `checkpoint.timestamp <= t`;
-2. when equal timestamps have multiple checkpoint candidates, choose the earliest safe offset unless equivalence tests prove another choice retains all same-time changes;
-3. seek an independently validated reader to the checkpoint;
-4. parse normally and apply the existing inclusive time filter;
-5. stop after observing a timestamp greater than `window.end`.
+1. if `t == 0`, select `BODY_START` unconditionally;
+2. require the generation's timestamp sequence to be non-decreasing; otherwise use body-start streaming;
+3. choose the greatest positive timestamp checkpoint with `checkpoint.timestamp <= t`; if no positive checkpoint satisfies that condition, select `BODY_START`;
+4. for an equal-timestamp run, use its earliest safe offset so no same-time change is skipped;
+5. seek an independently generation-validated reader to the checkpoint;
+6. parse normally and apply the existing inclusive time filter;
+7. stop after observing a timestamp greater than `window.end`.
 
 Because current extraction and toggle semantics do not synthesize state active before `start`, v1 stores no signal snapshot. Any future semantic mode requiring active values must use a new format/flag and must not reinterpret v1 records.
 
@@ -80,7 +70,10 @@ The builder supports:
 
 - minimum byte distance from the previous checkpoint;
 - optional minimum timestamp distance;
-- a mandatory first/body-start record;
+- a mandatory first/body-start record and no separate timestamp-command record for timestamp zero;
+- earliest-offset coalescing for equal timestamps;
+- exclusion of timestamps inside simulation-command blocks;
+- monotonicity detection with sparse-index disable/fallback;
 - a mandatory last useful timestamp record if it improves tail access.
 
 A timestamp is recorded when either enabled threshold is crossed. Default thresholds are **TBD at Gate G4**. The initial benchmark candidate is a 64 MiB byte stride; timestamp units are file-specific and therefore must not be the only default criterion.

@@ -243,26 +243,27 @@ It does not store prior signal state. This is compatible only because current ex
 
 ### 8.3 Selective timeline cache — optional
 
-Cache keys are `IdCode`, not names, so aliases share one timeline.
+Cache keys are `IdCode`, not names, so aliases share one timeline. M3 selected a structure-of-arrays layout:
 
 ```rust
-struct CompactEvent {
-    time: u64,
-    sequence: u64,
-    value: CompactValue,
-}
-
-enum CompactValue {
-    Integer(u128),
-    FloatBits(u64),
-    Text(Arc<str>),
+struct CompactTimeline {
+    time: Vec<u64>,
+    sequence: Vec<u64>,
+    payload: Vec<[u64; 2]>,
+    kind: Vec<u8>,
+    text_pool: TextPool,
 }
 ```
+
+The fixed record costs 33 logical bytes/event before text-pool and allocator overhead, versus 48 bytes/event for the natural AoS enum layout measured on x86-64. `payload` stores u128 halves, exact `f64::to_bits()`, or a text-table ID. Scalar 0/1/X/Z use direct tags. Exact text bytes are preserved and interning is bounded/benefit-aware rather than retaining duplicate ownership for all-unique text.
 
 Requirements:
 
 - stable `sequence` preserves same-time body ordering across IDs;
 - names are not stored in events;
+- exact u128, float-bit, wide/XZ, and string fidelity is retained;
+- text-table/hash/vector capacity is included in ownership accounting;
+- builders reserve/check budget incrementally because one clock timeline can exceed tens or hundreds of MiB;
 - cache hits use binary search by time and a stable k-way merge by `(time, sequence)`;
 - cache ownership is byte-accounted and bounded;
 - active readers retain timelines through `Arc` after eviction;

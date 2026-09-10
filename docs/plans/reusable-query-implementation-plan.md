@@ -698,18 +698,18 @@ Pass when:
 
 # M3 — Required technical spikes and design freeze
 
-Milestone status: `IN_PROGRESS`
+Milestone status: `DONE`
 Entry: Gate G3 passed
-Exit: Gate G4
+Exit: Gate G4 passed
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M3-T01 | READY | G3 | Confirm independent snapshot-reader behavior across targets |
-| RQ-M3-T02 | READY | G3 | Prove parser-safe timestamp offsets/resume |
-| RQ-M3-T03 | READY | G3 | Prototype compact event bytes/order fidelity |
-| RQ-M3-T04 | READY | G3 | Prototype bounded server scheduling/cancellation/backpressure |
-| RQ-M3-T05 | READY | G3 | Freeze protocol value/numeric schemas and limits |
-| RQ-M3-T06 | BLOCKED | T01-T05 | Gate report selecting mechanisms or deferring features |
+| RQ-M3-T01 | DONE | G3 | Confirm independent snapshot-reader behavior across targets |
+| RQ-M3-T02 | DONE | G3 | Prove parser-safe timestamp offsets/resume |
+| RQ-M3-T03 | DONE | G3 | Prototype compact event bytes/order fidelity |
+| RQ-M3-T04 | DONE | G3 | Prototype bounded server scheduling/cancellation/backpressure |
+| RQ-M3-T05 | DONE | G3 | Freeze protocol value/numeric schemas and limits |
+| RQ-M3-T06 | DONE | T01-T05 | Gate report selecting mechanisms or deferring features |
 
 ## RQ-M3-T01 — Snapshot-reader spike
 
@@ -768,7 +768,32 @@ Resolve:
 
 Add golden JSON fixtures before server implementation.
 
+## M3 spike evidence and proposed decisions
+
+Status: **ACCEPTED / G4 PASSED**.
+
+Durable reports:
+
+- [`../benchmarks/artifacts/m3/offset-spike.md`](../benchmarks/artifacts/m3/offset-spike.md)
+- [`../benchmarks/artifacts/m3/event-representation-spike.md`](../benchmarks/artifacts/m3/event-representation-spike.md)
+- [`../benchmarks/artifacts/m3/scheduler-spike.md`](../benchmarks/artifacts/m3/scheduler-spike.md)
+- [`../design/unix-json-protocol-v1.md`](../design/unix-json-protocol-v1.md)
+
+Proposed mechanism selections:
+
+1. **Snapshot readers:** retain the current configured-path reopen, generation validation, and independent `File`/parser design. No positioned-I/O adapter is required before M4.
+2. **Sparse offsets:** PASS with guards. Use `parser.reader().stream_position()` before safe timestamp commands; exclude timestamps inside simulation-command blocks, disable sparse seek for decreasing-timestamp generations, coalesce repeated timestamps to the earliest offset, and retain body-start fallback.
+3. **Compact timeline:** select per-`IdCode` SoA records with `time:u64`, `sequence:u64`, 16-byte payload, one-byte kind, and a bounded text pool. This is 33 logical bytes/event before text/allocator overhead versus 48 bytes/event AoS. Cache enablement/default remains deferred to G7.
+4. **Scheduler:** select standard-library fixed threads plus bounded `sync_channel` queues and one cancellation-aware expensive-scan permit per generation. The spike bounded admission at workers+queue capacity and observed <=1.475 ms cancellation handling. No async runtime is justified for M4.
+5. **Protocol:** accept the exact frozen v1 contract in `unix-json-protocol-v1.md`: native Unix `serve` only, tagged values with float bits, event-only extract, streamed list/extract, no compare/cache/shutdown, decimal strings for waveform/count/limit data, separate encoded-byte accounting, frozen limits/errors/capabilities/security lifecycle.
+
+T06/G4 review must verify these decisions and retain M5/G6 and M6/G7 implementation gates; M3 does not ship sidecar/cache/server production code.
+
 ## Gate G4 — Mechanism selection
+
+Current status: **PASSED**.
+
+Reviewer accepted T01–T05 after exact protocol and sidecar fallback corrections. Selected mechanisms are the existing independent reader, guarded parser-safe offsets, SoA compact events for future cache work, bounded standard-library threads/channels, and the frozen native Unix JSONL protocol. M4 may begin; sidecar/cache production remains gated by M5/G6 and M6/G7.
 
 Required decisions:
 
@@ -782,12 +807,13 @@ Required decisions:
 
 # M4 — Experimental bounded Unix-socket server, streaming backend
 
-Milestone status: `BLOCKED` on G4
+Milestone status: `IN_PROGRESS`
+Entry: Gate G4 passed
 Exit: Gate G5
 
 | ID | Status | Depends on | Deliverable |
 |---|---|---|---|
-| RQ-M4-T01 | BLOCKED | G4 | Protocol types/decoder/encoder and golden tests |
+| RQ-M4-T01 | READY | G4 | Protocol types/decoder/encoder and golden tests |
 | RQ-M4-T02 | BLOCKED | T01 | Safe listener lifecycle and permissions |
 | RQ-M4-T03 | BLOCKED | T01 | Bounded scheduler and request registry |
 | RQ-M4-T04 | BLOCKED | T02,T03 | Connection reader/writer and backpressure |
@@ -1200,6 +1226,22 @@ Follow [`../benchmarks/reusable-query-baseline.md`](../benchmarks/reusable-query
 | Compatibility impact | None; this changes gate timing/evidence, not supported targets or production behavior |
 | Rollback | Restore native link requirement to G2 and keep M2 blocked until release-runner evidence exists |
 | Status | `APPROVED` |
+
+## CR-003 — Freeze native-only Unix JSON protocol v1
+
+| Field | Record |
+|---|---|
+| Change ID | `CR-003` |
+| Owner/approval | Supervising implementation authority; proposed from RQ-M3-T05 for G4 review |
+| Affected tasks | `RQ-M3-T05`, M4 server implementation, G5, G8 packaging |
+| Clarification | V1 is the native Unix `vcd_tools_rs serve` subcommand from source/native archives; the pip Python console does not expose server mode |
+| Frozen value/extract schema | Tagged `integer|float|text` values, exact float bits, event width, event-only extraction, decimal strings for waveform/count/limit data |
+| Frozen initial methods | `ping`, `describe`, streamed `list`, `metadata`, streamed `extract`, `find`, `toggles`, `cancel`; compare/cache/shutdown/aligned output are not advertised |
+| Limits/accounting | Engine logical bytes and socket encoded bytes are independent; bounded frame/request/queue/connection defaults are normative for M4 golden fixtures |
+| Evidence | `docs/design/unix-json-protocol-v1.md` and `docs/benchmarks/artifacts/m3/scheduler-spike.md` |
+| Compatibility impact | Additive native server interface only; existing CLI query and Python module behavior is unchanged |
+| Rollback | Defer M4 and retain the reusable query engine without a server transport |
+| Status | `APPROVED AT G4` |
 
 Future changes must append another record using this template:
 

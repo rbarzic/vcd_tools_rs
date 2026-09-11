@@ -68,16 +68,18 @@ pub struct WaveformMeta {
 
 ## 3. Format detection
 
-Detection is content-based:
+Detection is content-based. The implemented standalone detection helper currently:
 
-1. Open and fingerprint one configured source generation.
-2. If an explicit hint is `Fst`, require `fst_reader::is_fst_file` and a successful FST open.
-3. If an explicit hint is `Vcd`, require a successful VCD header parse.
-4. Under `Auto`, probe FST magic/content first, restore/reopen the handle, then parse as FST when true; otherwise attempt a real VCD header parse.
-5. If both fail, return a bounded `UnsupportedWaveform` error containing format categories, not unbounded parser text.
-6. Extension affects diagnostics/probe ordering only; mislabeled and extensionless valid files remain usable.
+1. Opens one file handle and rejects inputs larger than 8 GiB for this lightweight detection path.
+2. Rejects an FST whole-file gzip-wrapper marker before `fst-reader` can decompress it into memory.
+3. Probes and validates FST through the same opened handle, containing parser panics and bounding parser error text.
+4. If the input is not FST, validates it by opening `OpenedVcd`.
+5. Enforces `Auto`, `Vcd`, or `Fst` hints and reports explicit format mismatches.
+6. Ignores the filename extension; mislabeled and extensionless valid files remain detectable.
 
-Detection, hierarchy/header parsing, and generation identity must refer to the same source generation. Replacement between requests can change format; the server opens the complete replacement before atomically swapping `Arc<OpenedWaveform>`.
+`detect_waveform_format` returns classification only. A later consumer must open and validate its own generation. When `OpenedWaveform` is added, its open operation must combine detection, backend construction, and generation identity so replacement between classification and use cannot mix generations.
+
+Detection errors are project-owned and bounded; no `fst-reader` type appears in the public API. Empty, truncated, gzip-wrapped, and oversized inputs have focused regression tests.
 
 ## 4. `OpenedFst`
 
@@ -314,7 +316,7 @@ Remain VCD-only until the separate ten-signal byte-golden trace fixture exists.
 
 `fst-reader` 0.17 contains assertions, panic/todo paths, and allocations based on file metadata. Before release:
 
-- place `catch_unwind` around FST open/hierarchy/read boundaries;
+- the standalone detection boundary already uses `catch_unwind`; retain equivalent boundaries around future FST open/hierarchy/read paths;
 - convert panic to a typed parser/internal error without terminating the server;
 - add malformed/truncated/deep/oversized fixtures;
 - validate every handle before constructing filters;

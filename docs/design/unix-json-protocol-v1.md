@@ -139,7 +139,7 @@ Params: `{}`.
 Result:
 
 ```json
-{"protocol":"1","package_version":"0.1.8","uptime_ms":"1234","ready":true}
+{"protocol":"1","package_version":"0.2.0","uptime_ms":"1234","ready":true}
 ```
 
 #### `describe`

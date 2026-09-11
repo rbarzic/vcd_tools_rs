@@ -270,7 +270,7 @@ def main():
         prog="vcd_tools_rs",
         description="VCD file analysis tools",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.8")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.2.0")
     parser.add_argument("--log-level",
                         default="info",
                         choices=["error", "warn", "info", "debug"],

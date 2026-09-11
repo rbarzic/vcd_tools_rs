@@ -204,11 +204,11 @@ These are compatibility exceptions, not desired new server semantics. M0 locks t
 
 ## 11. Packaging and platforms
 
-- Rust 2024 package version `0.1.8`.
+- Rust 2024 package version `0.2.0`.
 - Library crate types: `rlib` and `cdylib`.
 - Optional `python` feature enables PyO3 ABI3 Python 3.8.
 - Native binaries: `vcd_tools_rs` and `vcd2trace`.
-- PyPI project `vcd-tools` version `0.1.8`; the console command uses the Python wrapper and exposes Unix `serve` through the compiled extension.
+- PyPI project `vcd-tools` version `0.2.0`; the console command uses the Python wrapper and exposes Unix `serve` through the compiled extension.
 - Release workflow builds Linux x64/ARM64, macOS Intel/ARM64, and Windows x64 archives containing both native binaries.
 - Server work must not remove existing Windows artifacts or make Python wheels require Unix-only APIs.
 

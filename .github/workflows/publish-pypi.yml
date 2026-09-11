@@ -94,6 +94,7 @@ jobs:
           test -n "$wheel"
           wheel=$(realpath "$wheel")
           repo=$PWD
+          expected_version=$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
           cd /tmp
           python3 -m venv /tmp/vcd-wheel-smoke
           /tmp/vcd-wheel-smoke/bin/pip install "$wheel"
@@ -116,14 +117,14 @@ jobs:
             sleep 0.02
           done
           test -S "$socket"
-          /tmp/vcd-wheel-smoke/bin/python - "$socket" <<'PY'
+          /tmp/vcd-wheel-smoke/bin/python - "$socket" "$expected_version" <<'PY'
           import json, socket, sys
           client = socket.socket(socket.AF_UNIX)
           client.connect(sys.argv[1])
           client.sendall(b'{"v":1,"id":"wheel","method":"ping","params":{}}\n')
           reply = json.loads(client.makefile().readline())
           assert reply["result"]["ready"] is True, reply
-          assert reply["result"]["package_version"] == "0.1.8", reply
+          assert reply["result"]["package_version"] == sys.argv[2], reply
           PY
           kill -TERM "$pid"
           wait "$pid"

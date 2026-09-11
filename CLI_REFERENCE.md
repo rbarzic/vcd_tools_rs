@@ -1,5 +1,7 @@
 # vcd_tools_rs CLI Reference
 
+> **FST development status:** The `fst-support` branch currently provides a safe, content-based VCD/FST detection API for Rust callers. The CLI commands documented below are still VCD-only until `OpenedFst` and the generic query facade are implemented. A `.fst` extension alone does not mean the installed CLI supports FST. See [`FST_PLAN.md`](FST_PLAN.md) for current status.
+
 A fast streaming VCD (Value Change Dump) analysis tool written in Rust, also available as a Python library via `pip install vcd-tools`.
 
 ## Table of Contents

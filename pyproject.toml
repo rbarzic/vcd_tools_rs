@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "vcd-tools"
-version = "0.1.8"
+version = "0.2.0"
 requires-python = ">=3.8"
 description = "Fast VCD analysis tools with reusable queries and native Unix server mode"
 readme = "README.md"

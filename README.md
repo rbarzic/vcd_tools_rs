@@ -4,6 +4,29 @@ Fast streaming VCD (Value Change Dump) analysis tool and Python library, written
 
 Provides commands to list signals, query metadata, extract time/value pairs, count toggles, search for value occurrences, and diff two VCD files — all with a memory-efficient streaming parser.
 
+## FST implementation status
+
+First-class FST support is being developed on the `fst-support` branch. The current implementation foundation includes:
+
+- the pure-Rust `fst-reader` 0.17 backend dependency;
+- content-based VCD/FST format detection through the Rust API;
+- explicit format assertions and deterministic mismatch errors;
+- parser-panic containment, bounded error text, an 8 GiB detection limit, and rejection of whole-file gzip-wrapped FST;
+- a reproducible generated FST fixture with a committed semantic oracle.
+
+The existing CLI, Python functions, server, comparison engine, and `OpenedVcd` remain VCD-only at this stage. Do not assume that a released `vcd_tools_rs` binary accepts FST merely because the Rust detection API is present. User-facing FST support will be documented when the `OpenedFst` and `OpenedWaveform` query backends are implemented.
+
+Current additive Rust API:
+
+```rust
+use vcd_tools_rs::{detect_waveform_format, WaveformFormatHint};
+
+let format = detect_waveform_format("simulation.fst", WaveformFormatHint::Auto)?;
+println!("{format}"); // "fst" or "vcd"
+```
+
+Detection uses file contents, not the extension. It classifies and validates the input at detection time; a later consumer must still open and validate its own file generation. See [`FST_PLAN.md`](FST_PLAN.md) and the [FST architecture](docs/design/fst-support-architecture.md) for implementation status and supported-subset decisions.
+
 ## Installation
 
 ### Option 1: pip (Python users)

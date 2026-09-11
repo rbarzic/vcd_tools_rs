@@ -1,0 +1,16 @@
+{
+  "producer": "fst-writer 0.3.1",
+  "version": "vcd_tools_rs test fixture",
+  "date": "2025-01-01",
+  "timescale_exponent": -9,
+  "start_time": 0,
+  "end_time": 5,
+  "declarations": [
+    {"name": "top.a", "handle_index": 0, "width": 1, "alias": false},
+    {"name": "top.a_alias", "handle_index": 0, "width": 1, "alias": true}
+  ],
+  "events": [
+    {"time": 0, "handle_index": 0, "value": "0"},
+    {"time": 5, "handle_index": 0, "value": "1"}
+  ]
+}

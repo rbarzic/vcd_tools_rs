@@ -78,13 +78,13 @@ Initial tested version: 0.17.0.
 
 # F0 — Contract, dependency, and fixtures
 
-Milestone status: `READY`  
+Milestone status: `IN_PROGRESS`
 Exit: FST-G0
 
 | ID | Status | Depends | Deliverable |
 |---|---|---|---|
-| FST-F0-T01 | READY | — | Add/pin `fst-reader` and record license/dependency evidence |
-| FST-F0-T02 | READY | — | Add deterministic tiny FST fixture generator and provenance |
+| FST-F0-T01 | IN_PROGRESS | — | Add/pin `fst-reader` and record license/dependency evidence |
+| FST-F0-T02 | IN_PROGRESS | — | Add deterministic tiny FST fixture generator and provenance |
 | FST-F0-T03 | BLOCKED | T02 | Characterize ordering/window/alias/value semantics |
 | FST-F0-T04 | BLOCKED | T02 | Corrupt/truncated/deep/oversized/gzip fixture probes |
 | FST-F0-T05 | BLOCKED | T02 | Packed-real, real change, generic string, extended state spike |
@@ -155,14 +155,14 @@ Pass only when:
 
 # F1 — Format-neutral types and detection
 
-Milestone status: `BLOCKED` on FST-G0  
+Milestone status: `IN_PROGRESS` on FST-G0
 Exit: FST-G1
 
 | ID | Status | Depends | Deliverable |
 |---|---|---|---|
-| FST-F1-T01 | BLOCKED | G0 | `WaveformFormat`, hint, timescale, metadata, signal ID/kind |
-| FST-F1-T02 | BLOCKED | T01 | Extensible `WaveformError` and query mapping |
-| FST-F1-T03 | BLOCKED | T01,T02 | Content detection with explicit override |
+| FST-F1-T01 | IN_PROGRESS | G0 | `WaveformFormat`, hint, timescale, metadata, signal ID/kind |
+| FST-F1-T02 | IN_PROGRESS | T01 | Extensible `WaveformError` and query mapping |
+| FST-F1-T03 | IN_PROGRESS | T01,T02 | Content detection with explicit override |
 | FST-F1-T04 | BLOCKED | T01-T03 | `OpenedWaveform` additive enum facade |
 | FST-F1-T05 | BLOCKED | T04 | Common catalog/metadata/validation accessors |
 | FST-F1-T06 | BLOCKED | T01-T05 | VCD regression and public API review |

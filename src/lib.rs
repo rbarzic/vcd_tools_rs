@@ -3,10 +3,14 @@ mod header;
 pub mod opened;
 pub mod query;
 pub mod server;
+pub mod waveform;
 
 pub use opened::{
     CatalogMemoryUsage, ContentFingerprint, FileIdentity, FingerprintPolicy, GenerationId,
     OpenOptions, OpenedBodyReader, OpenedVcd, SignalRef,
+};
+pub use waveform::{
+    detect_waveform_format, WaveformDetectionError, WaveformFormat, WaveformFormatHint,
 };
 
 use std::collections::{HashMap, VecDeque};

@@ -74,8 +74,8 @@ FST already indexes compressed data sections by time and signal. The VCD sparse 
 
 | Milestone | Scope | Status | Exit gate |
 |---|---|---|---|
-| F0 | Dependency, fixtures, and semantic decisions | READY | FST-G0 |
-| F1 | Format-neutral types and detection | BLOCKED | FST-G1 |
+| F0 | Dependency, fixtures, and semantic decisions | IN_PROGRESS | FST-G0 |
+| F1 | Format-neutral types and detection | IN_PROGRESS | FST-G1 |
 | F2 | `OpenedFst`, hierarchy catalog, identity | BLOCKED | FST-G2 |
 | F3 | FST query visitor and operations | BLOCKED | FST-G3 |
 | F4 | CLI, Python, compare, and server | BLOCKED | FST-G4 |
@@ -85,7 +85,7 @@ FST already indexes compressed data sections by time and signal. The VCD sparse 
 
 | Gate | Decision | Status | Required evidence |
 |---|---|---|---|
-| FST-G0 | Approve parser and semantic subset | OPEN | Tiny fixtures, semantic decisions, panic/resource policy, license review |
+| FST-G0 | Approve parser and semantic subset | IN_PROGRESS | Tiny fixtures, semantic decisions, panic/resource policy, license review |
 | FST-G1 | Accept additive waveform facade | BLOCKED | VCD APIs/tests unchanged; content detection exact |
 | FST-G2 | Accept FST open/catalog/identity | BLOCKED | Catalog/metadata/generation correctness and memory target |
 | FST-G3 | Accept FST query parity | BLOCKED | Extract/find/toggle/compare semantics, cancellation, malformed input |
@@ -110,7 +110,7 @@ FST already indexes compressed data sections by time and signal. The VCD sparse 
 ## Immediate next actions
 
 1. Review and approve or amend the twelve FST-G0 decisions.
-2. Add `fst-reader = "0.17"` and record its BSD-3-Clause notice obligations.
-3. Generate deterministic tiny valid/equivalent/corrupt FST fixtures with provenance and hashes.
+2. Finish dependency/license qualification for `fst-reader = "0.17"` and test-only `fst-writer = "0.3.1"`.
+3. Extend the deterministic tiny fixture set with equivalent VCD/FST and corrupt cases, provenance, hashes, and semantic oracles.
 4. Characterize packed-real, generic-string, extended digital states, same-time order, gzip wrapper, and malformed-input behavior.
 5. Do not migrate CLI, Python, or server code until FST-G0 and FST-G1 pass.

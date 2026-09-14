@@ -1,10 +1,22 @@
 # vcd_tools_rs CLI Reference
 
-> **FST development status:** The `fst-support` branch currently provides a safe, content-based VCD/FST detection API for Rust callers. The CLI commands documented below are still VCD-only until `OpenedFst` and the generic query facade are implemented. A `.fst` extension alone does not mean the installed CLI supports FST. See [`FST_PLAN.md`](FST_PLAN.md) for current status.
+> **Current format support:** The query commands documented below (`list`, `meta`, `extract`, `toggle`, `find`, `compare`, and `serve`) currently accept VCD files only. The Rust library also provides content-based VCD/FST detection, but FST query backends are not implemented yet. A `.fst` extension alone does not make the installed CLI support FST. See [`FST_PLAN.md`](FST_PLAN.md) for the implementation roadmap.
 
 A fast streaming VCD (Value Change Dump) analysis tool written in Rust, also available as a Python library via `pip install vcd-tools`.
 
-## Table of Contents
+## Format support
+
+| Surface | VCD | FST |
+|---------|-----|-----|
+| Native CLI queries | Supported | Not yet supported |
+| Python query functions | Supported | Not yet supported |
+| Unix `serve` mode | Supported | Not yet supported |
+| Rust format detection API | Supported | Supported |
+
+Format detection is content-based rather than extension-based. It validates an input as VCD or FST, but detection does not add FST support to the query commands. Use the Rust `detect_waveform_format` API when you need to classify an input before selecting a backend.
+
+---
+
 
 - [Installation](#installation)
 - [Global Options](#global-options)
@@ -290,7 +302,7 @@ vcd_tools_rs compare reference.vcd actual.vcd --start 0 --end 1000000
 
 ### serve
 
-Run the experimental native Unix-domain query server for one VCD.
+Run the experimental native Unix-domain query server for one VCD. FST inputs are not supported by server mode yet.
 
 > `serve` is available in native Linux/macOS builds and through the pip-installed console on Unix. Windows does not expose Unix socket server mode.
 
@@ -315,6 +327,8 @@ Stop the foreground server with Ctrl-C. The owned socket is removed during grace
 ---
 
 ## Python API
+
+The Python query functions documented below accept VCD files only. FST detection is currently available through the Rust API, not through the Python query functions.
 
 Install with `pip install vcd-tools`, then:
 

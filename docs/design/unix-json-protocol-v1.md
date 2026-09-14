@@ -28,7 +28,7 @@ The draft has the right transport and lifecycle, but it is not yet a protocol fr
 3. list streaming versus unary behavior;
 4. exact initial method/capability/error surface.
 
-It also advertises cache methods before a cache exists and says the subcommand-versus-binary choice is unresolved even though G0 accepted the native `serve` subcommand. The largest hidden product gap is packaging: the PyPI `vcd_tools_rs` command is the Python wrapper, not the native Rust binary, so it cannot automatically expose the native `serve` subcommand.
+It also advertises cache methods before a cache exists and says the subcommand-versus-binary choice is unresolved even though G0 accepted the native `serve` subcommand. The packaging decision is now implemented: Unix PyPI wheels expose `vcd_tools_rs serve` through the compiled extension, while Windows wheels do not expose Unix server mode.
 
 ## Drift / contradiction check
 
@@ -38,7 +38,7 @@ It also advertises cache methods before a cache exists and says the subcommand-v
 - **Two byte limits are conflated:** `QueryLimits::max_result_bytes` counts logical in-memory event bytes, not JSON bytes. The server must independently count every encoded frame plus newline.
 - **Error taxonomy mismatch:** protocol codes are more specific than `QueryErrorCode::Vcd`; `IO_ERROR` is not meaningfully distinct in the current engine because non-stale `VcdError::Io` becomes `SourceUnavailable`.
 - **Window behavior intentionally differs:** Rust compatibility accepts `start > end` as empty, while the server draft says `INVALID_WINDOW`. This is acceptable only as explicit transport validation, not an engine semantic change.
-- **Pip/native command mismatch:** README currently describes the pip console and native binary as equivalent for queries. They will not be equivalent for `serve` unless wheels package/dispatch the native binary or PyO3 exposes the server. That work is not in the current milestone.
+- **Pip/native command behavior:** Unix PyPI wheels and native Unix builds both expose `vcd_tools_rs serve` through the compiled Rust implementation. The query surface remains VCD-only; FST detection exists in the Rust API but FST query/server backends are not implemented.
 - **Server compare conflicts with one-file ownership:** compare requires a second source and selected-timeline materialization. It must remain deferred.
 
 ## Recommendation
@@ -139,7 +139,7 @@ Params: `{}`.
 Result:
 
 ```json
-{"protocol":"1","package_version":"0.2.0","uptime_ms":"1234","ready":true}
+{"protocol":"1","package_version":"0.2.1","uptime_ms":"1234","ready":true}
 ```
 
 #### `describe`

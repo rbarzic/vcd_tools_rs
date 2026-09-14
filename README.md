@@ -1,12 +1,20 @@
 # vcd_tools_rs
 
-Fast streaming VCD (Value Change Dump) analysis tool and Python library, written in Rust.
+Fast streaming waveform analysis tool and Python library, written in Rust.
 
-Provides commands to list signals, query metadata, extract time/value pairs, count toggles, search for value occurrences, and diff two VCD files — all with a memory-efficient streaming parser.
+The current query engine provides commands to list signals, query metadata, extract time/value pairs, count toggles, search for value occurrences, and diff two VCD files — all with a memory-efficient streaming parser.
 
-## FST implementation status
+## Current format support
 
-First-class FST support is being developed on the `fst-support` branch. The current implementation foundation includes:
+| Surface | VCD | FST |
+|---------|-----|-----|
+| Rust format detection API | Supported | Supported |
+| Native CLI queries (`list`, `meta`, `extract`, `toggle`, `find`) | Supported | Not yet supported |
+| Python query functions | Supported | Not yet supported |
+| Unix `serve` mode | Supported | Not yet supported |
+| `compare` and `vcd2trace` | Supported | Not yet supported |
+
+FST support is currently limited to safe format detection and validation through the Rust API. The current implementation foundation includes:
 
 - the pure-Rust `fst-reader` 0.17 backend dependency;
 - content-based VCD/FST format detection through the Rust API;
@@ -14,7 +22,7 @@ First-class FST support is being developed on the `fst-support` branch. The curr
 - parser-panic containment, bounded error text, an 8 GiB detection limit, and rejection of whole-file gzip-wrapped FST;
 - a reproducible generated FST fixture with a committed semantic oracle.
 
-The existing CLI, Python functions, server, comparison engine, and `OpenedVcd` remain VCD-only at this stage. Do not assume that a released `vcd_tools_rs` binary accepts FST merely because the Rust detection API is present. User-facing FST support will be documented when the `OpenedFst` and `OpenedWaveform` query backends are implemented.
+The CLI, Python query functions, Unix server, comparison engine, and `OpenedVcd` remain VCD-only. A `.fst` extension does not make an input queryable: the released CLI and Python APIs reject FST because the `OpenedFst` and `OpenedWaveform` query backends are not implemented yet. User-facing FST query support will be documented when those backends are available.
 
 Current additive Rust API:
 
@@ -94,7 +102,7 @@ vcd_tools_rs find simulation.vcd \
 vcd_tools_rs compare reference.vcd actual.vcd \
   [--max-mismatches 10] [--ignore-unknown] [--output json|compact]
 
-# Experimental local query server (Unix native build or Unix PyPI wheel)
+# Experimental local VCD query server (Unix native build or Unix PyPI wheel)
 mkdir -m 700 /tmp/vcd-tools-$USER
 vcd_tools_rs serve simulation.vcd \
   --socket /tmp/vcd-tools-$USER/server.sock
@@ -104,7 +112,7 @@ Global flags: `--pretty` (table output), `--log-level` (`error`/`warn`/`info`/`d
 
 ### Experimental server availability
 
-Server mode is available from native Unix builds, Linux/macOS release archives, and Unix PyPI wheels. It binds one VCD to an owner-only Unix-domain socket and supports `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles`, and `cancel` using protocol v1 JSON Lines.
+Server mode is available from native Unix builds, Linux/macOS release archives, and Unix PyPI wheels. It currently accepts one VCD only; FST server support is not available yet. The server binds that VCD to an owner-only Unix-domain socket and supports `ping`, `describe`, `list`, `metadata`, `extract`, `find`, `toggles`, and `cancel` using protocol v1 JSON Lines.
 
 After `pip install vcd-tools`, the same command is available on Unix:
 
@@ -169,7 +177,7 @@ diff = vcd_tools.compare("reference.vcd", "actual.vcd",
 #    "mismatches": [{"signal": ..., "time": ..., "value1": ..., "value2": ...}], ...}
 ```
 
-All functions raise `RuntimeError` on VCD parse errors or missing signals.
+All query functions currently accept VCD files only and raise `RuntimeError` on parse errors or missing signals. FST detection is available only through the Rust API shown above; FST query support is not yet exposed through Python.
 
 ---
 

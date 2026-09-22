@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use clap::{ArgAction, Parser, Subcommand};
 use log::LevelFilter;
 
-use vcd_tools_rs::opened::OpenedVcd;
+use vcd_tools_rs::opened::{FstError, OpenedFst, OpenedVcd};
 use vcd_tools_rs::query::QueryContext;
 #[cfg(unix)]
 use vcd_tools_rs::server::app::run_server_until_signal;
@@ -14,8 +14,8 @@ use vcd_tools_rs::server::runtime::RuntimeConfig;
 #[cfg(unix)]
 use vcd_tools_rs::server::service::ServiceConfig;
 use vcd_tools_rs::{
-    ComparisonOptions, TimeValue, TimeWindow, format_value_for_signal, load_signal_list,
-    parse_target_value,
+    ComparisonOptions, TimeValue, TimeWindow, WaveformFormat, WaveformFormatHint,
+    detect_waveform_format, format_value_for_signal, load_signal_list, parse_target_value,
 };
 
 #[derive(Parser, Debug)]
@@ -329,16 +329,40 @@ where
 }
 
 fn handle_list(vcd: &Path, filter: Option<String>, pretty: bool) -> Result<()> {
-    let opened = OpenedVcd::open(vcd)?;
-    let names = opened.list_signals(filter.as_deref());
-    print_signal_list(&names, pretty);
+    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
+        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
+        print_signal_list(&opened.list_signals(filter.as_deref()), pretty);
+    } else {
+        let opened = OpenedVcd::open(vcd)?;
+        print_signal_list(&opened.list_signals(filter.as_deref()), pretty);
+    }
     Ok(())
 }
 
+fn print_fst_metadata(meta: &vcd_tools_rs::FstMeta, pretty: bool) {
+    let timescale = format!("10^{} s", meta.timescale_exponent);
+    let rows = vec![
+        vec!["signals".to_string(), meta.signal_count.to_string()],
+        vec!["timescale".to_string(), timescale],
+        vec!["start_time".to_string(), meta.start_time.to_string()],
+        vec!["end_time".to_string(), meta.end_time.to_string()],
+    ];
+    if pretty {
+        print_table(&["Field", "Value"], &rows);
+    } else {
+        for row in rows { println!("{}\t{}", row[0], row[1]); }
+    }
+}
+
 fn handle_meta(vcd: &Path, pretty: bool) -> Result<()> {
-    let opened = OpenedVcd::open(vcd)?;
-    let meta = opened.metadata()?;
-    print_metadata(&meta, pretty);
+    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
+        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
+        print_fst_metadata(opened.metadata(), pretty);
+    } else {
+        let opened = OpenedVcd::open(vcd)?;
+        let meta = opened.metadata()?;
+        print_metadata(meta.as_ref(), pretty);
+    }
     Ok(())
 }
 
@@ -350,6 +374,22 @@ fn handle_extract(
     pretty: bool,
 ) -> Result<()> {
     let names = collect_signal_names(&signals, signals_file.as_deref())?;
+    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
+        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
+        let sizes = opened
+            .signals()
+            .iter()
+            .map(|signal| (signal.name.clone(), signal.width))
+            .collect::<HashMap<_, _>>();
+        let events = opened.extract(&names, window).map_err(|error| anyhow::anyhow!(error))?;
+        emit_time_aligned(
+            events.into_iter().map(Ok::<TimeValue, FstError>),
+            &names,
+            &sizes,
+            pretty,
+        )?;
+        return Ok(());
+    }
     let opened = OpenedVcd::open(vcd)?;
     let missing = names
         .iter()
@@ -376,6 +416,26 @@ fn handle_toggle(
     pretty: bool,
 ) -> Result<()> {
     let names = collect_signal_names(&signals, signals_file.as_deref())?;
+    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
+        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
+        let events = opened.extract(&names, window).map_err(|error| anyhow::anyhow!(error))?;
+        let mut counts: HashMap<String, usize> = names.iter().map(|name| (name.clone(), 0)).collect();
+        let mut previous: HashMap<String, String> = HashMap::new();
+        for event in events {
+            let value = format_value_for_signal(&event.value, 1);
+            if let Some(old) = previous.get(&event.signal) {
+                if old != &value { *counts.entry(event.signal.clone()).or_default() += 1; }
+            }
+            previous.insert(event.signal, value);
+        }
+        let headers = vec!["signal", "toggles"];
+        let rows: Vec<Vec<String>> = names.iter().map(|name| vec![name.clone(), counts[name].to_string()]).collect();
+        if pretty { print_table(&headers, &rows); } else {
+            println!("{}", headers.join("\t"));
+            for row in rows { println!("{}", row.join("\t")); }
+        }
+        return Ok(());
+    }
     let opened = OpenedVcd::open(vcd)?;
     let toggle_counts = opened.count_toggles(
         &names,
@@ -413,6 +473,30 @@ fn handle_find(
     }
 
     let parsed_value = parse_target_value(&value);
+    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
+        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
+        let size_bits = opened
+            .signals()
+            .iter()
+            .find(|candidate| candidate.name == signal)
+            .map(|candidate| candidate.width)
+            .ok_or_else(|| anyhow::anyhow!("FST signal not found: {signal}"))?;
+        let events = opened.extract(&[signal.clone()], window).map_err(|error| anyhow::anyhow!(error))?;
+        let target = parsed_value.normalize();
+        let event = events.into_iter().filter(|event| event.value.normalize() == target).nth(occurrence.saturating_sub(1));
+        let event = event.ok_or_else(|| anyhow::anyhow!("No matching occurrence found in the specified window."))?;
+        let formatted_value = format_value_for_signal(&event.value, size_bits);
+        let headers = vec!["time".to_string(), signal.clone()];
+        let row = vec![event.time.to_string(), formatted_value];
+        if pretty {
+            let header_refs: Vec<&str> = headers.iter().map(|h| h.as_str()).collect();
+            print_table(&header_refs, &[row]);
+        } else {
+            println!("{}", headers.join("\t"));
+            println!("{}", row.join("\t"));
+        }
+        return Ok(());
+    }
     let opened = OpenedVcd::open(vcd)?;
     let (event, size_bits) = opened.find_nth_occurrence(
         &signal,

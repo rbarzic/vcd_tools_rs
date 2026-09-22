@@ -1,3 +1,4 @@
+mod fst;
 mod identity;
 
 use std::fmt;
@@ -12,6 +13,8 @@ use crate::catalog::{CatalogMemoryEstimate, SignalCatalog, SignalKey};
 use crate::header::read_identified_compact_header;
 use crate::query::{QueryContext, QueryError, QueryLimitKind, QueryResult};
 use crate::{Result, Signal, SignalIndex, Timescale, VcdError, VcdMeta};
+
+pub use fst::{FstError, FstMeta, FstSignal, OpenedFst};
 
 pub use identity::{
     ContentFingerprint, FileIdentity, FingerprintPolicy, GenerationId, OpenOptions,

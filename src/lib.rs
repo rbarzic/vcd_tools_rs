@@ -6,12 +6,12 @@ pub mod server;
 pub mod waveform;
 
 pub use opened::{
-    CatalogMemoryUsage, ContentFingerprint, FileIdentity, FingerprintPolicy, FstError,
-    FstMeta, FstSignal, GenerationId, OpenOptions, OpenedBodyReader, OpenedFst, OpenedVcd,
-    SignalRef,
+    CatalogMemoryUsage, ContentFingerprint, FileIdentity, FingerprintPolicy, FstError, FstMeta,
+    FstSignal, FstSignalType, GenerationId, OpenOptions, OpenedBodyReader, OpenedFst, OpenedVcd,
+    OpenedWaveform, SignalRef,
 };
 pub use waveform::{
-    detect_waveform_format, WaveformDetectionError, WaveformFormat, WaveformFormatHint,
+    WaveformDetectionError, WaveformFormat, WaveformFormatHint, detect_waveform_format,
 };
 
 use std::collections::{HashMap, VecDeque};
@@ -360,20 +360,8 @@ pub fn compute_time_bounds<R: BufRead>(mut parser: Parser<R>) -> Result<(u64, u6
 }
 
 pub fn read_vcd_metadata(path: impl AsRef<Path>) -> Result<VcdMeta> {
-    let path = path.as_ref();
-    if matches!(detect_waveform_format(path, WaveformFormatHint::Auto), Ok(WaveformFormat::Fst)) {
-        let meta = opened::OpenedFst::open(path).map_err(|error| VcdError::Parse(error.to_string()))?;
-        return Ok(VcdMeta {
-            timescale: None,
-            signal_count: meta.metadata().signal_count,
-            start_time: meta.metadata().start_time,
-            end_time: meta.metadata().end_time,
-        });
-    }
     let opened = opened::OpenedVcd::open(path)?;
-    opened
-        .metadata()
-        .map(|metadata| metadata.as_ref().clone())
+    opened.metadata().map(|metadata| metadata.as_ref().clone())
 }
 
 pub fn build_target_map(
@@ -400,13 +388,6 @@ pub fn extract_time_values_from_file(
     targets: &[String],
     window: TimeWindow,
 ) -> Result<Vec<TimeValue>> {
-    let path = path.as_ref();
-    if matches!(detect_waveform_format(path, WaveformFormatHint::Auto), Ok(WaveformFormat::Fst)) {
-        return opened::OpenedFst::open(path)
-            .map_err(|error| VcdError::Parse(error.to_string()))?
-            .extract(targets, window)
-            .map_err(|error| VcdError::Parse(error.to_string()));
-    }
     let opened = opened::OpenedVcd::open(path)?;
     opened
         .extract(targets, window, &query::QueryContext::legacy_unlimited())
@@ -422,24 +403,6 @@ pub fn find_nth_occurrence(
     occurrence: usize,
     window: TimeWindow,
 ) -> Result<(Option<TimeValue>, u32)> {
-    let path = path.as_ref();
-    if matches!(detect_waveform_format(path, WaveformFormatHint::Auto), Ok(WaveformFormat::Fst)) {
-        let opened = opened::OpenedFst::open(path).map_err(|error| VcdError::Parse(error.to_string()))?;
-        let size = opened
-            .signals()
-            .iter()
-            .find(|candidate| candidate.name == signal)
-            .map(|candidate| candidate.width)
-            .ok_or_else(|| VcdError::MissingSignal(signal.to_string()))?;
-        if occurrence < 1 { return Err(VcdError::InvalidOccurrence); }
-        let target = target_value.normalize();
-        let event = opened.extract(&[signal.to_string()], window)
-            .map_err(|error| VcdError::Parse(error.to_string()))?
-            .into_iter()
-            .filter(|event| event.value.normalize() == target)
-            .nth(occurrence - 1);
-        return Ok((event, size));
-    }
     let opened = opened::OpenedVcd::open(path)?;
     opened
         .find_nth_occurrence(
@@ -459,12 +422,6 @@ pub fn tokenize_file(path: impl AsRef<Path>) -> Result<Parser<BufReader<File>>> 
 }
 
 pub fn list_signals_from_file(path: impl AsRef<Path>, filter: Option<&str>) -> Result<Vec<String>> {
-    let path = path.as_ref();
-    if matches!(detect_waveform_format(path, WaveformFormatHint::Auto), Ok(WaveformFormat::Fst)) {
-        return opened::OpenedFst::open(path)
-            .map(|opened| opened.list_signals(filter))
-            .map_err(|error| VcdError::Parse(error.to_string()));
-    }
     Ok(opened::OpenedVcd::open(path)?.list_signals(filter))
 }
 
@@ -505,30 +462,9 @@ pub fn count_toggles(
     targets: &[String],
     window: TimeWindow,
 ) -> Result<HashMap<String, usize>> {
-    let path = path.as_ref();
-    if matches!(detect_waveform_format(path, WaveformFormatHint::Auto), Ok(WaveformFormat::Fst)) {
-        let events = opened::OpenedFst::open(path)
-            .map_err(|error| VcdError::Parse(error.to_string()))?
-            .extract(targets, window)
-            .map_err(|error| VcdError::Parse(error.to_string()))?;
-        let mut counts = targets.iter().map(|name| (name.clone(), 0)).collect::<HashMap<_, _>>();
-        let mut previous = HashMap::new();
-        for event in events {
-            let value = format_value_for_signal(&event.value, 1);
-            if previous.get(&event.signal).is_some_and(|old| old != &value) {
-                *counts.entry(event.signal.clone()).or_default() += 1;
-            }
-            previous.insert(event.signal, value);
-        }
-        return Ok(counts);
-    }
     let opened = opened::OpenedVcd::open(path)?;
     opened
-        .count_toggles(
-            targets,
-            window,
-            &query::QueryContext::legacy_unlimited(),
-        )
+        .count_toggles(targets, window, &query::QueryContext::legacy_unlimited())
         .map_err(query::into_vcd_error)
 }
 
@@ -542,15 +478,15 @@ pub struct SignalMismatch {
     pub time: u64,
     pub value1: ChangeValue,
     pub value2: ChangeValue,
-    pub is_unknown: bool,  // true if one value is 'x' or 'z'
+    pub is_unknown: bool, // true if one value is 'x' or 'z'
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComparisonOptions {
-    pub max_mismatches: Option<usize>,  // Limit number of mismatches per signal
-    pub signals_only: Vec<String>,      // Only compare these signals
-    pub ignore_unknown: bool,            // Treat x/z differences as matches
-    pub time_window: TimeWindow,          // Only compare within this time range
+    pub max_mismatches: Option<usize>, // Limit number of mismatches per signal
+    pub signals_only: Vec<String>,     // Only compare these signals
+    pub ignore_unknown: bool,          // Treat x/z differences as matches
+    pub time_window: TimeWindow,       // Only compare within this time range
 }
 
 impl Default for ComparisonOptions {
@@ -559,7 +495,10 @@ impl Default for ComparisonOptions {
             max_mismatches: None,
             signals_only: Vec::new(),
             ignore_unknown: false,
-            time_window: TimeWindow { start: None, end: None },
+            time_window: TimeWindow {
+                start: None,
+                end: None,
+            },
         }
     }
 }
@@ -580,7 +519,10 @@ pub struct ComparisonResult {
 impl ComparisonResult {
     pub fn get_summary(&self) -> String {
         if self.passed {
-            format!("✅ PASS - All {} common signals match", self.common_signals.len())
+            format!(
+                "✅ PASS - All {} common signals match",
+                self.common_signals.len()
+            )
         } else {
             format!(
                 "❌ FAIL - {}/{} signals have mismatches ({} total mismatches)",
@@ -609,7 +551,9 @@ impl From<&ComparisonResult> for JsonComparisonResult {
     fn from(result: &ComparisonResult) -> Self {
         let mut mismatches_by_signal = std::collections::HashMap::new();
         for mismatch in &result.mismatches {
-            *mismatches_by_signal.entry(mismatch.signal_name.clone()).or_insert(0) += 1;
+            *mismatches_by_signal
+                .entry(mismatch.signal_name.clone())
+                .or_insert(0) += 1;
         }
 
         Self {
@@ -637,10 +581,6 @@ pub fn compare_vcd_files(
     let first = opened::OpenedVcd::open(file1)?;
     let second = opened::OpenedVcd::open(file2)?;
     first
-        .compare(
-            &second,
-            options,
-            &query::QueryContext::legacy_unlimited(),
-        )
+        .compare(&second, options, &query::QueryContext::legacy_unlimited())
         .map_err(query::into_vcd_error)
 }

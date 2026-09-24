@@ -1,5 +1,6 @@
-mod fst;
+pub(crate) mod fst;
 mod identity;
+mod waveform;
 
 use std::fmt;
 use std::fs::File;
@@ -14,7 +15,8 @@ use crate::header::read_identified_compact_header;
 use crate::query::{QueryContext, QueryError, QueryLimitKind, QueryResult};
 use crate::{Result, Signal, SignalIndex, Timescale, VcdError, VcdMeta};
 
-pub use fst::{FstError, FstMeta, FstSignal, OpenedFst};
+pub use fst::{FstError, FstMeta, FstSignal, FstSignalType, OpenedFst};
+pub use waveform::OpenedWaveform;
 
 pub use identity::{
     ContentFingerprint, FileIdentity, FingerprintPolicy, GenerationId, OpenOptions,

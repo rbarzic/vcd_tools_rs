@@ -8,11 +8,11 @@ The exact decisions under **Frozen protocol v1** are normative. The diagnosis be
 
 ## Inherited decisions
 
-- The server is a local debugging facility for repeated queries against exactly one VCD selected at process startup.
+- The server is a local debugging facility for repeated queries against exactly one VCD or FST waveform selected at process startup.
 - The reusable `OpenedVcd`/query engine is authoritative; transport code must not parse VCD commands or change query semantics.
 - Source content is immutable per generation. Admission and successful completion are generation-validated; stale streamed output is incomplete and must be discarded.
 - V1 transport is a Unix-domain stream socket using UTF-8 JSON Lines. No TCP, HTTP, gRPC, WebSocket, or Windows named pipes.
-- Accepted command shape is native `vcd_tools_rs serve <vcd> --socket <path>` on Unix.
+- Accepted command shape is native `vcd_tools_rs serve <waveform> --socket <path>` on Unix.
 - Existing CLI/Python semantics remain compatibility boundaries: inclusive windows, no synthesized value at `start`, duplicate request multiplicity/order, scalar text, known vectors up to 128 bits as integers, and body order.
 - `QueryContext` already supplies cooperative cancellation, deadline, signal/row/logical-result-byte/command limits. Socket encoded-byte limits remain separate.
 - `QueryError` supplies stable categories, but transport must refine `QueryError::Vcd(VcdError)` to protocol-specific codes.
@@ -38,7 +38,7 @@ It also advertises cache methods before a cache exists and says the subcommand-v
 - **Two byte limits are conflated:** `QueryLimits::max_result_bytes` counts logical in-memory event bytes, not JSON bytes. The server must independently count every encoded frame plus newline.
 - **Error taxonomy mismatch:** protocol codes are more specific than `QueryErrorCode::Vcd`; `IO_ERROR` is not meaningfully distinct in the current engine because non-stale `VcdError::Io` becomes `SourceUnavailable`.
 - **Window behavior intentionally differs:** Rust compatibility accepts `start > end` as empty, while the server draft says `INVALID_WINDOW`. This is acceptable only as explicit transport validation, not an engine semantic change.
-- **Pip/native command behavior:** Unix PyPI wheels and native Unix builds both expose `vcd_tools_rs serve` through the compiled Rust implementation. The query surface remains VCD-only; FST detection exists in the Rust API but FST query/server backends are not implemented.
+- **Pip/native command behavior:** Unix PyPI wheels and native Unix builds both expose `vcd_tools_rs serve` through the compiled Rust implementation. The query surface auto-detects VCD/FST content and `describe` reports `source_format`; Windows still does not expose Unix server mode.
 - **Server compare conflicts with one-file ownership:** compare requires a second source and selected-timeline materialization. It must remain deferred.
 
 ## Recommendation
@@ -53,7 +53,7 @@ It also advertises cache methods before a cache exists and says the subcommand-v
 
 - One native process owns exactly one VCD fixed at startup.
 - Unix only.
-- Entry point: `vcd_tools_rs serve <VCD> --socket <PATH>`.
+- Entry point: `vcd_tools_rs serve <WAVEFORM> --socket <PATH>`.
 - No dedicated server binary in v1.
 - On non-Unix targets, Unix server modules/dependencies are target-gated; existing library and native binaries continue to build. The `serve` variant may be absent on non-Unix.
 - **Distribution freeze:** v1 server mode is supported from source builds, native Linux/macOS archives, and Unix PyPI wheels. The pip-installed `vcd_tools_rs serve` command calls the compiled extension. Windows wheels do not expose `serve`.
@@ -139,7 +139,7 @@ Params: `{}`.
 Result:
 
 ```json
-{"protocol":"1","package_version":"0.2.1","uptime_ms":"1234","ready":true}
+{"protocol":"1","package_version":"0.3.0","uptime_ms":"1234","ready":true}
 ```
 
 #### `describe`
@@ -152,6 +152,7 @@ Result includes:
 {
   "protocol":"1",
   "generation":"7",
+  "source_format":"vcd",
   "signal_count":"193730",
   "timescale":{"magnitude":"1","unit":"fs"},
   "source_size":"4589561612",
@@ -364,10 +365,11 @@ Frozen mapping:
 | deadline | `DEADLINE_EXCEEDED` | true |
 | generation mismatch | `STALE_SOURCE` | true |
 | non-stale `QueryError::SourceUnavailable` | `SOURCE_UNAVAILABLE` | true |
-| missing enddefinitions, duplicate declaration, parser failure, other `QueryError::Vcd` | `PARSE_ERROR` | false |
+| missing enddefinitions, duplicate VCD declaration, VCD parser failure, other `QueryError::Vcd` | `PARSE_ERROR` | false |
+| FST signal-data parser failure or contained FST parser panic | `FST_ERROR` | false |
 | panic/invariant/unclassified failure | `INTERNAL` | false |
 
-Remove `IO_ERROR` and `UNSUPPORTED_PLATFORM` from request-level v1 codes: current engine does not distinguish a useful generic I/O category, and unsupported server platforms cannot establish the Unix protocol. Do not expose a generic `VCD_ERROR` code.
+Remove `IO_ERROR` and `UNSUPPORTED_PLATFORM` from request-level v1 codes: current engine does not distinguish a useful generic I/O category, and unsupported server platforms cannot establish the Unix protocol. VCD failures retain `PARSE_ERROR`; FST parser failures use the format-specific `FST_ERROR` category.
 
 `LIMIT_EXCEEDED.details` includes `kind`, `limit`, and `actual` as strings. Signal errors include a bounded ordered `signals` array. Unsupported version includes `supported_versions:["1"]`. Details and message lengths are bounded.
 

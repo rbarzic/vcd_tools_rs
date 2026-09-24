@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::opened::OpenedVcd;
+use crate::opened::{OpenedFst, OpenedVcd, OpenedWaveform};
 use crate::query::{QueryContext, QueryResult};
 use crate::{ChangeValue, ComparisonOptions, ComparisonResult, SignalMismatch};
 
@@ -55,6 +55,80 @@ impl TimelineProvider for OpenedVcd {
         self.validate_source()
             .map_err(crate::query::QueryError::from)?;
         context.check()
+    }
+}
+
+impl TimelineProvider for OpenedFst {
+    fn ordered_signal_names(&self) -> Vec<String> {
+        self.signal_names().map(str::to_string).collect()
+    }
+
+    fn display_name(&self) -> String {
+        self.path().to_string_lossy().into_owned()
+    }
+
+    fn collect_timelines(
+        &self,
+        signals: &[String],
+        options: &ComparisonOptions,
+        context: &QueryContext,
+    ) -> QueryResult<SignalTimelines> {
+        let mut timelines = signals
+            .iter()
+            .map(|signal| (signal.clone(), Vec::new()))
+            .collect::<SignalTimelines>();
+        for event in self.extract_with_context(signals, options.time_window, context)? {
+            if let Some(timeline) = timelines.get_mut(&event.signal) {
+                timeline.push((event.time, event.value));
+            }
+        }
+        Ok(timelines)
+    }
+
+    fn validate_complete(&self, context: &QueryContext) -> QueryResult<()> {
+        context.check()?;
+        self.validate_source()
+            .map_err(crate::opened::fst::fst_to_query)?;
+        context.check()
+    }
+}
+
+impl OpenedWaveform {
+    pub fn compare(
+        &self,
+        other: &OpenedWaveform,
+        options: &ComparisonOptions,
+        context: &QueryContext,
+    ) -> QueryResult<ComparisonResult> {
+        let compatible_timescale = match (self, other) {
+            (OpenedWaveform::Vcd(_), OpenedWaveform::Vcd(_)) => true,
+            (OpenedWaveform::Fst(first), OpenedWaveform::Fst(second)) => {
+                first.metadata().timescale_exponent == second.metadata().timescale_exponent
+            }
+            (OpenedWaveform::Vcd(vcd), OpenedWaveform::Fst(fst))
+            | (OpenedWaveform::Fst(fst), OpenedWaveform::Vcd(vcd)) => {
+                fst.metadata().timescale.is_some() && vcd.timescale() == fst.timescale()
+            }
+        };
+        if !compatible_timescale {
+            return Err(crate::query::QueryError::UnsupportedWaveform(
+                "waveform comparison requires equal physical timescales".into(),
+            ));
+        }
+        match (self, other) {
+            (OpenedWaveform::Vcd(first), OpenedWaveform::Vcd(second)) => {
+                compare_providers(first, second, options, context)
+            }
+            (OpenedWaveform::Vcd(first), OpenedWaveform::Fst(second)) => {
+                compare_providers(first, second, options, context)
+            }
+            (OpenedWaveform::Fst(first), OpenedWaveform::Vcd(second)) => {
+                compare_providers(first, second, options, context)
+            }
+            (OpenedWaveform::Fst(first), OpenedWaveform::Fst(second)) => {
+                compare_providers(first, second, options, context)
+            }
+        }
     }
 }
 

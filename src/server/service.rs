@@ -8,7 +8,7 @@ use std::time::Instant;
 use serde::Serialize;
 use serde_json::{Value, json, to_value};
 
-use crate::opened::OpenedVcd;
+use crate::opened::OpenedWaveform;
 use crate::query::{QueryContext, QueryError, QueryLimits};
 use crate::server::protocol::{
     CHUNK_BYTES, CHUNK_ROWS, DescribeResult, DistributionCapabilities, FindResult, MetadataResult,
@@ -70,14 +70,18 @@ impl ServiceConfig {
 #[derive(Debug)]
 pub struct GenerationSlot {
     path: PathBuf,
-    current: Mutex<Arc<OpenedVcd>>,
+    current: Mutex<Arc<OpenedWaveform>>,
 }
 
 impl GenerationSlot {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ProtocolError> {
         let display_path = path.as_ref().to_path_buf();
-        let opened = OpenedVcd::open(&display_path).map_err(map_vcd)?;
-        let path = opened.configured_path().to_path_buf();
+        let opened = OpenedWaveform::open(&display_path).map_err(map_waveform)?;
+        let path = match &opened {
+            OpenedWaveform::Vcd(value) => value.configured_path(),
+            OpenedWaveform::Fst(value) => value.configured_path(),
+        }
+        .to_path_buf();
         Ok(Self {
             path,
             current: Mutex::new(Arc::new(opened)),
@@ -86,12 +90,12 @@ impl GenerationSlot {
 
     /// Return the current complete generation, atomically replacing it between
     /// requests when the configured path no longer identifies that generation.
-    pub fn current(&self) -> Result<Arc<OpenedVcd>, ProtocolError> {
+    pub fn current(&self) -> Result<Arc<OpenedWaveform>, ProtocolError> {
         let mut current = self.current.lock().expect("generation slot lock");
         if current.validate_source().is_ok() {
             return Ok(Arc::clone(&current));
         }
-        let replacement = Arc::new(OpenedVcd::open(&self.path).map_err(map_vcd)?);
+        let replacement = Arc::new(OpenedWaveform::open(&self.path).map_err(map_waveform)?);
         *current = Arc::clone(&replacement);
         Ok(replacement)
     }
@@ -211,7 +215,7 @@ impl VcdService {
         Ok((runtime.query_context(limits), response))
     }
 
-    fn current(&self, runtime: &RequestContext) -> Result<Arc<OpenedVcd>, ProtocolError> {
+    fn current(&self, runtime: &RequestContext) -> Result<Arc<OpenedWaveform>, ProtocolError> {
         runtime.check()?;
         let opened = self.generation.current()?;
         runtime.check()?;
@@ -244,7 +248,7 @@ impl VcdService {
             RequestMethod::Describe => {
                 let opened = self.current(runtime)?;
                 let result = self.describe(&opened);
-                opened.validate_source().map_err(map_vcd)?;
+                opened.validate_source().map_err(map_query)?;
                 send_unary(
                     output,
                     &id,
@@ -261,35 +265,43 @@ impl VcdService {
                     output,
                     id,
                     "signal_name.v1",
-                    opened.generation().get(),
+                    opened.generation(),
                     response_limit,
                     self.runtime.max_encoded_frame_bytes as u64,
                 )?;
                 let mut rows = Vec::new();
                 let max_rows = query.limits().max_rows().unwrap_or(self.limits.max_rows);
-                for name in opened.signal_names() {
-                    query.check().map_err(map_query)?;
-                    if params
-                        .filter
-                        .as_ref()
-                        .is_some_and(|filter| !name.contains(filter))
-                    {
-                        continue;
-                    }
-                    if stream.rows + rows.len() as u64 >= max_rows {
-                        return Err(limit_error("rows", max_rows, max_rows.saturating_add(1)));
-                    }
-                    rows.push(Value::String(name.to_string()));
-                    if rows.len() == CHUNK_ROWS as usize {
-                        stream.send_rows(output, std::mem::take(&mut rows))?;
-                        self.after_stream_chunk();
-                    }
-                }
+                opened
+                    .visit_signal_names(&query, |name| {
+                        if params
+                            .filter
+                            .as_ref()
+                            .is_some_and(|filter| !name.contains(filter))
+                        {
+                            return Ok(());
+                        }
+                        if stream.rows + rows.len() as u64 >= max_rows {
+                            return Err(QueryError::LimitExceeded {
+                                kind: crate::query::QueryLimitKind::Rows,
+                                limit: max_rows,
+                                actual: max_rows.saturating_add(1),
+                            });
+                        }
+                        rows.push(Value::String(name.to_string()));
+                        if rows.len() == CHUNK_ROWS as usize {
+                            stream
+                                .send_rows(output, std::mem::take(&mut rows))
+                                .map_err(|error| QueryError::Internal(error.to_string()))?;
+                            self.after_stream_chunk();
+                        }
+                        Ok(())
+                    })
+                    .map_err(map_query)?;
                 if !rows.is_empty() {
                     stream.send_rows(output, rows)?;
                     self.after_stream_chunk();
                 }
-                opened.validate_source().map_err(map_vcd)?;
+                opened.validate_source().map_err(map_query)?;
                 query.check().map_err(map_query)?;
                 stream.finish(output, 0)
             }
@@ -297,18 +309,17 @@ impl VcdService {
                 let (query, response_limit) =
                     self.query_context(runtime, params.max_commands, None, None)?;
                 let opened = self.current(runtime)?;
-                let metadata = runtime.with_expensive_scan(|| {
-                    opened.metadata_with_context(&query).map_err(map_query)
-                })?;
+                let metadata =
+                    runtime.with_expensive_scan(|| opened.metadata(&query).map_err(map_query))?;
                 let result = MetadataResult {
-                    signal_count: metadata.signal_count.to_string(),
-                    timescale: metadata.timescale.as_ref().map(WireTimescale::from),
-                    start_time: metadata.start_time.to_string(),
-                    end_time: metadata.end_time.to_string(),
+                    signal_count: metadata.0.to_string(),
+                    timescale: metadata.1.as_ref().map(WireTimescale::from),
+                    start_time: metadata.2.to_string(),
+                    end_time: metadata.3.to_string(),
                 };
                 self.before_metadata_publish();
                 query.check().map_err(map_query)?;
-                opened.validate_source().map_err(map_vcd)?;
+                opened.validate_source().map_err(map_query)?;
                 query.check().map_err(map_query)?;
                 send_unary(
                     output,
@@ -326,55 +337,59 @@ impl VcdService {
                     params.max_response_bytes,
                 )?;
                 let opened = self.current(runtime)?;
-                let window = TimeWindow {
-                    start: params.start,
-                    end: params.end,
-                };
-                let mut events = opened
-                    .extract(&params.signals, window, &query)
-                    .map_err(map_query)?;
+                if let Some(missing) = params
+                    .signals
+                    .iter()
+                    .find(|signal| opened.width(signal).is_none())
+                {
+                    return Err(map_query(QueryError::SignalNotFound(missing.clone())));
+                }
                 let mut stream = StreamOutput::begin(
                     output,
                     id,
                     "time_value.v1",
-                    opened.generation().get(),
+                    opened.generation(),
                     response_limit,
                     self.runtime.max_encoded_frame_bytes as u64,
                 )?;
-                loop {
-                    let batch = runtime.with_expensive_scan(|| {
-                        let mut rows = Vec::with_capacity(CHUNK_ROWS as usize);
-                        while rows.len() < CHUNK_ROWS as usize {
-                            match events.next() {
-                                Some(Ok(event)) => {
-                                    let width = opened
-                                        .signal(&event.signal)
-                                        .map_or(1, |signal| signal.size());
-                                    rows.push(
-                                        to_value(TimeValueRow {
-                                            signal: event.signal,
-                                            time: event.time.to_string(),
-                                            width: width.to_string(),
-                                            value: WireValue::from(&event.value),
-                                        })
-                                        .map_err(internal_serialization)?,
-                                    );
+                let mut rows = Vec::new();
+                let mut emitted = 0u64;
+                runtime.with_expensive_scan(|| {
+                    opened
+                        .visit_changes(
+                            &params.signals,
+                            TimeWindow {
+                                start: params.start,
+                                end: params.end,
+                            },
+                            &query,
+                            |event| {
+                                rows.push(
+                                    to_value(TimeValueRow {
+                                        signal: event.signal.clone(),
+                                        time: event.time.to_string(),
+                                        width: opened.width(&event.signal).unwrap_or(1).to_string(),
+                                        value: WireValue::from(&event.value),
+                                    })
+                                    .map_err(|error| QueryError::Internal(error.to_string()))?,
+                                );
+                                emitted += 1;
+                                if rows.len() == CHUNK_ROWS as usize {
+                                    stream
+                                        .send_rows(output, std::mem::take(&mut rows))
+                                        .map_err(|error| QueryError::Internal(error.to_string()))?;
+                                    self.after_stream_chunk();
                                 }
-                                Some(Err(error)) => return Err(map_query(error)),
-                                None => return Ok((rows, true)),
-                            }
-                        }
-                        Ok((rows, false))
-                    })?;
-                    if !batch.0.is_empty() {
-                        stream.send_rows(output, batch.0)?;
-                        self.after_stream_chunk();
-                    }
-                    if batch.1 {
-                        break;
-                    }
+                                Ok(())
+                            },
+                        )
+                        .map_err(map_query)
+                })?;
+                if !rows.is_empty() {
+                    stream.send_rows(output, rows)?;
+                    self.after_stream_chunk();
                 }
-                stream.finish(output, events.commands_processed())
+                stream.finish(output, emitted)
             }
             RequestMethod::Find(params) => {
                 let (query, response_limit) = self.query_context(
@@ -459,13 +474,14 @@ impl VcdService {
         }
     }
 
-    fn describe(&self, opened: &OpenedVcd) -> DescribeResult {
+    fn describe(&self, opened: &OpenedWaveform) -> DescribeResult {
         DescribeResult {
             protocol: "1".into(),
-            generation: opened.generation().get().to_string(),
+            generation: opened.generation().to_string(),
+            source_format: opened.format().to_string(),
             signal_count: opened.signal_count().to_string(),
             timescale: opened.timescale().map(WireTimescale::from),
-            source_size: opened.identity().len().to_string(),
+            source_size: opened.source_size().to_string(),
             immutable_source: true,
             methods: METHODS.into_iter().map(str::to_string).collect(),
             schemas: SCHEMAS.into_iter().map(str::to_string).collect(),
@@ -715,8 +731,13 @@ fn map_query(error: QueryError) -> ProtocolError {
     protocol_error_from_query(&error)
 }
 
-fn map_vcd(error: crate::VcdError) -> ProtocolError {
-    map_query(QueryError::from(error))
+fn map_waveform(error: crate::WaveformDetectionError) -> ProtocolError {
+    ProtocolError::new(
+        ProtocolErrorCode::SourceUnavailable,
+        "waveform source unavailable",
+        json!({"message": error.to_string()}),
+        true,
+    )
 }
 
 fn map_io(error: std::io::Error) -> ProtocolError {

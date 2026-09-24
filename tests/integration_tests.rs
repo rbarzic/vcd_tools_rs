@@ -138,7 +138,10 @@ fn find_nth_occurrence_finds_value() {
         "chip_wrapper.TRSTN",
         vcd_tools_rs::TargetValue::Integer(1),
         1,
-        vcd_tools_rs::TimeWindow { start: None, end: None },
+        vcd_tools_rs::TimeWindow {
+            start: None,
+            end: None,
+        },
     )
     .expect("find occurrence");
     assert!(event.is_some());
@@ -153,7 +156,10 @@ fn find_nth_occurrence_not_found() {
         "chip_wrapper.TRSTN",
         vcd_tools_rs::TargetValue::Integer(999),
         1,
-        vcd_tools_rs::TimeWindow { start: None, end: None },
+        vcd_tools_rs::TimeWindow {
+            start: None,
+            end: None,
+        },
     )
     .expect("find occurrence");
     assert!(event.is_none());
@@ -183,7 +189,10 @@ fn find_nth_occurrence_invalid() {
         "chip_wrapper.TRSTN",
         vcd_tools_rs::TargetValue::Integer(1),
         0,
-        vcd_tools_rs::TimeWindow { start: None, end: None },
+        vcd_tools_rs::TimeWindow {
+            start: None,
+            end: None,
+        },
     );
     assert!(result.is_err());
 }
@@ -215,11 +224,7 @@ fn parse_target_value_hex_uppercase() {
 #[test]
 fn load_signal_list_reads_file() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(
-        tmp.path(),
-        "signal_one\nsignal_two\n\nsignal_three\n",
-    )
-    .unwrap();
+    std::fs::write(tmp.path(), "signal_one\nsignal_two\n\nsignal_three\n").unwrap();
     let names = vcd_tools_rs::load_signal_list(tmp.path()).unwrap();
     assert_eq!(names, vec!["signal_one", "signal_two", "signal_three"]);
 }
@@ -255,11 +260,7 @@ fn load_signal_list_comments() {
 #[test]
 fn load_signal_list_only_comments() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(
-        tmp.path(),
-        "# comment 1\n# comment 2\n",
-    )
-    .unwrap();
+    std::fs::write(tmp.path(), "# comment 1\n# comment 2\n").unwrap();
     let names = vcd_tools_rs::load_signal_list(tmp.path()).unwrap();
     assert!(names.is_empty());
 }
@@ -387,7 +388,11 @@ fn compare_vcd_files_signals_only() {
         },
     )
     .expect("compare files");
-    assert!(result.common_signals.contains(&"chip_wrapper.TRSTN".to_string()));
+    assert!(
+        result
+            .common_signals
+            .contains(&"chip_wrapper.TRSTN".to_string())
+    );
 }
 
 #[test]
@@ -404,8 +409,8 @@ fn compare_vcd_files_get_summary() {
 
 #[test]
 fn list_signals_from_file() {
-    let names = vcd_tools_rs::list_signals_from_file(vcd_path(), Some("TRSTN"))
-        .expect("list signals");
+    let names =
+        vcd_tools_rs::list_signals_from_file(vcd_path(), Some("TRSTN")).expect("list signals");
     assert!(!names.is_empty());
     for name in &names {
         assert!(name.contains("TRSTN"));
@@ -414,8 +419,7 @@ fn list_signals_from_file() {
 
 #[test]
 fn list_signals_from_file_no_filter() {
-    let names = vcd_tools_rs::list_signals_from_file(vcd_path(), None)
-        .expect("list signals");
+    let names = vcd_tools_rs::list_signals_from_file(vcd_path(), None).expect("list signals");
     assert!(names.len() > 100_000);
 }
 
@@ -505,15 +509,13 @@ fn compare_result_failed_summary() {
         common_signals: vec!["sig1".to_string(), "sig2".to_string()],
         signals_only_in_file1: vec![],
         signals_only_in_file2: vec![],
-        mismatches: vec![
-            vcd_tools_rs::SignalMismatch {
-                signal_name: "sig1".to_string(),
-                time: 10,
-                value1: vcd_tools_rs::ChangeValue::Integer(1),
-                value2: vcd_tools_rs::ChangeValue::Integer(0),
-                is_unknown: false,
-            },
-        ],
+        mismatches: vec![vcd_tools_rs::SignalMismatch {
+            signal_name: "sig1".to_string(),
+            time: 10,
+            value1: vcd_tools_rs::ChangeValue::Integer(1),
+            value2: vcd_tools_rs::ChangeValue::Integer(0),
+            is_unknown: false,
+        }],
         total_mismatches: 1,
         signals_with_mismatches: 1,
         passed: false,
@@ -553,8 +555,15 @@ fn comparison_options_default() {
 #[test]
 fn count_toggles_single_signal() {
     let targets = vec!["chip_wrapper.TRSTN".to_string()];
-    let counts = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None })
-        .expect("count toggles");
+    let counts = vcd_tools_rs::count_toggles(
+        vcd_path(),
+        &targets,
+        vcd_tools_rs::TimeWindow {
+            start: None,
+            end: None,
+        },
+    )
+    .expect("count toggles");
     assert!(counts.contains_key("chip_wrapper.TRSTN"));
     assert!(counts["chip_wrapper.TRSTN"] > 0);
 }
@@ -565,8 +574,15 @@ fn count_toggles_multiple_signals() {
         "chip_wrapper.TRSTN".to_string(),
         "chip_wrapper.U_CHIP.TRSTN".to_string(),
     ];
-    let counts = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None })
-        .expect("count toggles");
+    let counts = vcd_tools_rs::count_toggles(
+        vcd_path(),
+        &targets,
+        vcd_tools_rs::TimeWindow {
+            start: None,
+            end: None,
+        },
+    )
+    .expect("count toggles");
     assert!(counts.contains_key("chip_wrapper.TRSTN"));
     assert!(counts.contains_key("chip_wrapper.U_CHIP.TRSTN"));
     assert!(counts["chip_wrapper.TRSTN"] > 0);
@@ -580,27 +596,43 @@ fn count_toggles_empty_window() {
         start: Some(999999999999),
         end: Some(1000000000000),
     };
-    let counts = vcd_tools_rs::count_toggles(vcd_path(), &targets, window)
-        .expect("count toggles");
+    let counts = vcd_tools_rs::count_toggles(vcd_path(), &targets, window).expect("count toggles");
     assert_eq!(counts["chip_wrapper.TRSTN"], 0);
 }
 
 #[test]
 fn count_toggles_missing_signal() {
     let targets = vec!["nonexistent_signal".to_string()];
-    let result = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None });
+    let result = vcd_tools_rs::count_toggles(
+        vcd_path(),
+        &targets,
+        vcd_tools_rs::TimeWindow {
+            start: None,
+            end: None,
+        },
+    );
     assert!(result.is_err());
 }
 
 #[test]
 fn count_toggles_with_time_window() {
     let targets = vec!["chip_wrapper.TRSTN".to_string()];
-    let counts_full = vcd_tools_rs::count_toggles(vcd_path(), &targets, vcd_tools_rs::TimeWindow { start: None, end: None })
-        .expect("count toggles");
+    let counts_full = vcd_tools_rs::count_toggles(
+        vcd_path(),
+        &targets,
+        vcd_tools_rs::TimeWindow {
+            start: None,
+            end: None,
+        },
+    )
+    .expect("count toggles");
     let counts_limited = vcd_tools_rs::count_toggles(
         vcd_path(),
         &targets,
-        vcd_tools_rs::TimeWindow { start: Some(0), end: Some(100) },
+        vcd_tools_rs::TimeWindow {
+            start: Some(0),
+            end: Some(100),
+        },
     )
     .expect("count toggles");
     assert!(counts_limited["chip_wrapper.TRSTN"] <= counts_full["chip_wrapper.TRSTN"]);

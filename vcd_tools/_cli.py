@@ -268,20 +268,22 @@ def cmd_serve(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="vcd_tools_rs",
-        description="VCD file analysis tools",
+        description="VCD/FST waveform analysis tools",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.2.1")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.3.0")
     parser.add_argument("--log-level",
                         default="info",
                         choices=["error", "warn", "info", "debug"],
                         help="Logging level (default: info)")
+    parser.add_argument("--format", choices=["auto", "vcd", "fst"], default="auto",
+                        help="Input format assertion (default: auto)")
     parser.add_argument("--pretty",
                         action="store_true",
                         help="Render output using tables")
     sub = parser.add_subparsers(dest="command", required=True)
 
     # list
-    p = sub.add_parser("list", help="List signals declared in the VCD header")
+    p = sub.add_parser("list", help="List signals declared in a waveform header")
     p.add_argument("vcd")
     p.add_argument("--filter", help="Substring filter applied to signal names")
 
@@ -333,7 +335,7 @@ def main():
 
     # Native Unix server exposed by the compiled extension.
     if sys.platform != "win32":
-        p = sub.add_parser("serve", help="Serve one VCD over an owner-only Unix socket")
+        p = sub.add_parser("serve", help="Serve one VCD or FST over an owner-only Unix socket")
         p.add_argument("vcd")
         p.add_argument("--socket", required=True)
         p.add_argument("--workers", type=int, default=4)
@@ -350,6 +352,13 @@ def main():
         p.add_argument("--max-commands", type=int, default=1_000_000_000)
 
     args = parser.parse_args()
+
+    if args.format != "auto":
+        from vcd_tools.vcd_tools import assert_format
+        paths = ([args.reference, args.actual]
+                 if args.command == "compare" else [args.vcd])
+        for path in paths:
+            assert_format(path, args.format)
 
     dispatch = {
         "list": cmd_list,

@@ -152,12 +152,20 @@ fn binary_to_hex_with_x(binary: &str, width_bits: usize) -> String {
     let mut hex_chars = Vec::new();
     for chunk in padded.as_bytes().rchunks(4) {
         let nibble = std::str::from_utf8(chunk).unwrap();
-        if nibble.contains('x') || nibble.contains('X') || nibble.contains('z') || nibble.contains('Z') {
+        if nibble.contains('x')
+            || nibble.contains('X')
+            || nibble.contains('z')
+            || nibble.contains('Z')
+        {
             hex_chars.push('X');
         } else {
             // Convert 4-bit binary to hex
             let val = u8::from_str_radix(nibble, 2).unwrap_or(0);
-            hex_chars.push(std::char::from_digit(val as u32, 16).unwrap().to_ascii_uppercase());
+            hex_chars.push(
+                std::char::from_digit(val as u32, 16)
+                    .unwrap()
+                    .to_ascii_uppercase(),
+            );
         }
     }
 

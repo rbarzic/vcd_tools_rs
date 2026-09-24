@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use log::LevelFilter;
 
-use vcd_tools_rs::opened::{FstError, OpenedFst, OpenedVcd};
+use vcd_tools_rs::opened::OpenedWaveform;
 use vcd_tools_rs::query::QueryContext;
 #[cfg(unix)]
 use vcd_tools_rs::server::app::run_server_until_signal;
@@ -14,15 +14,15 @@ use vcd_tools_rs::server::runtime::RuntimeConfig;
 #[cfg(unix)]
 use vcd_tools_rs::server::service::ServiceConfig;
 use vcd_tools_rs::{
-    ComparisonOptions, TimeValue, TimeWindow, WaveformFormat, WaveformFormatHint,
-    detect_waveform_format, format_value_for_signal, load_signal_list, parse_target_value,
+    ComparisonOptions, TimeWindow, WaveformFormat, WaveformFormatHint, detect_waveform_format,
+    format_value_for_signal, load_signal_list, parse_target_value,
 };
 
 #[derive(Parser, Debug)]
 #[command(
     author,
     version,
-    about = "Stream VCD files and query signals (Rust edition)"
+    about = "Stream VCD/FST waveform files and query signals (Rust edition)"
 )]
 #[command()]
 struct Cli {
@@ -30,6 +30,23 @@ struct Cli {
     global_args: GlobalArgs,
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum FormatArg {
+    Auto,
+    Vcd,
+    Fst,
+}
+
+impl From<FormatArg> for WaveformFormatHint {
+    fn from(value: FormatArg) -> Self {
+        match value {
+            FormatArg::Auto => Self::Auto,
+            FormatArg::Vcd => Self::Vcd,
+            FormatArg::Fst => Self::Fst,
+        }
+    }
 }
 
 #[derive(clap::Args, Debug)]
@@ -40,19 +57,21 @@ struct GlobalArgs {
         help = "Logging level (info, debug, warn, error)"
     )]
     log_level: String,
+    #[arg(long, value_enum, default_value_t = FormatArg::Auto, global = true, help = "Input format assertion")]
+    format: FormatArg,
     #[arg(long, action = ArgAction::SetTrue, help = "Render output using tables", global = true)]
     pretty: bool,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// List signals declared in a VCD header
+    /// List signals declared in a waveform header
     List {
         vcd: PathBuf,
         #[arg(long, help = "Substring filter applied to signal names")]
         filter: Option<String>,
     },
-    /// Show metadata for a VCD file
+    /// Show metadata for a VCD or FST waveform
     Meta { vcd: PathBuf },
     /// Extract time/value pairs for specific signals
     Extract {
@@ -106,7 +125,7 @@ enum Commands {
         #[arg(long, help = "End time (inclusive)")]
         end: Option<u64>,
     },
-    /// Compare two VCD files and report differences
+    /// Compare two VCD/FST waveforms and report differences
     Compare {
         reference: PathBuf,
         actual: PathBuf,
@@ -124,13 +143,10 @@ enum Commands {
         start: Option<u64>,
         #[arg(long, help = "End time (inclusive)")]
         end: Option<u64>,
-        #[arg(
-            long,
-            help = "Output format (default, json, compact)"
-        )]
+        #[arg(long, help = "Output format (default, json, compact)")]
         output: Option<String>,
     },
-    /// Serve one immutable VCD generation over an owner-only Unix socket
+    /// Serve one immutable VCD or FST generation over an owner-only Unix socket
     #[cfg(unix)]
     Serve {
         vcd: PathBuf,
@@ -238,130 +254,49 @@ fn print_signal_list(names: &[String], pretty: bool) {
     }
 }
 
-fn print_metadata(meta: &vcd_tools_rs::VcdMeta, pretty: bool) {
-    let timescale = meta
-        .timescale
-        .as_ref()
-        .map(|t| format!("{} {}", t.magnitude, t.unit))
-        .unwrap_or_else(|| "n/a".to_string());
-    if pretty {
-        let rows = vec![
-            vec!["signals".to_string(), meta.signal_count.to_string()],
-            vec!["timescale".to_string(), timescale.clone()],
-            vec!["start_time".to_string(), meta.start_time.to_string()],
-            vec!["end_time".to_string(), meta.end_time.to_string()],
-        ];
-        print_table(&["Field", "Value"], &rows);
-    } else {
-        println!("signals\t{}", meta.signal_count);
-        println!("timescale\t{}", timescale);
-        println!("start_time\t{}", meta.start_time);
-        println!("end_time\t{}", meta.end_time);
-    }
+fn open_waveform(path: &Path, hint: WaveformFormatHint) -> Result<OpenedWaveform> {
+    OpenedWaveform::open_with_hint(path, hint).map_err(Into::into)
 }
 
-fn emit_time_aligned<I, E>(
-    events: I,
-    signal_order: &[String],
-    sizes: &HashMap<String, u32>,
+fn handle_list(
+    vcd: &Path,
+    filter: Option<String>,
     pretty: bool,
-) -> Result<()>
-where
-    I: IntoIterator<Item = std::result::Result<TimeValue, E>>,
-    E: Into<anyhow::Error>,
-{
-    let headers: Vec<String> = std::iter::once("time".to_string())
-        .chain(signal_order.iter().cloned())
-        .collect();
-    let mut last_values: HashMap<String, String> = signal_order
-        .iter()
-        .map(|s| (s.clone(), String::new()))
-        .collect();
-    let mut current_time: Option<u64> = None;
-    let mut rows: Vec<Vec<String>> = Vec::new();
-
-    if !pretty {
-        println!("{}", headers.join("\t"));
-    }
-
-    let emit_row =
-        |time_value: u64, values: &HashMap<String, String>, pretty_store: &mut Vec<Vec<String>>| {
-            let mut row: Vec<String> = Vec::with_capacity(signal_order.len() + 1);
-            row.push(time_value.to_string());
-            for name in signal_order {
-                row.push(values.get(name).cloned().unwrap_or_default());
-            }
-            if pretty {
-                pretty_store.push(row);
-            } else {
-                println!("{}", row.join("\t"));
-            }
-        };
-
-    for evt in events {
-        let evt = evt.map_err(Into::into)?;
-        if current_time.is_none() {
-            current_time = Some(evt.time);
-        }
-        if let Some(ct) = current_time {
-            if evt.time != ct {
-                emit_row(ct, &last_values, &mut rows);
-                current_time = Some(evt.time);
-            }
-        }
-        let size = *sizes.get(&evt.signal).unwrap_or(&1);
-        last_values.insert(
-            evt.signal.clone(),
-            format_value_for_signal(&evt.value, size),
-        );
-    }
-
-    if let Some(ct) = current_time {
-        emit_row(ct, &last_values, &mut rows);
-    }
-
+    hint: WaveformFormatHint,
+) -> Result<()> {
+    let opened = open_waveform(vcd, hint)?;
     if pretty {
-        let header_refs: Vec<&str> = headers.iter().map(|h| h.as_str()).collect();
-        print_table(&header_refs, &rows);
-    }
-
-    Ok(())
-}
-
-fn handle_list(vcd: &Path, filter: Option<String>, pretty: bool) -> Result<()> {
-    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
-        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
-        print_signal_list(&opened.list_signals(filter.as_deref()), pretty);
+        print_signal_list(&opened.list_signals(filter.as_deref()), true);
     } else {
-        let opened = OpenedVcd::open(vcd)?;
-        print_signal_list(&opened.list_signals(filter.as_deref()), pretty);
+        opened.visit_signal_names(&QueryContext::legacy_unlimited(), |name| {
+            if filter.as_ref().is_none_or(|needle| name.contains(needle)) {
+                println!("{name}");
+            }
+            Ok(())
+        })?;
     }
     Ok(())
 }
 
-fn print_fst_metadata(meta: &vcd_tools_rs::FstMeta, pretty: bool) {
-    let timescale = format!("10^{} s", meta.timescale_exponent);
+fn handle_meta(vcd: &Path, pretty: bool, hint: WaveformFormatHint) -> Result<()> {
+    let opened = open_waveform(vcd, hint)?;
+    let (signal_count, timescale, start_time, end_time) =
+        opened.metadata(&QueryContext::legacy_unlimited())?;
+    let timescale = timescale
+        .map(|value| format!("{} {}", value.magnitude, value.unit))
+        .unwrap_or_else(|| "n/a".into());
     let rows = vec![
-        vec!["signals".to_string(), meta.signal_count.to_string()],
-        vec!["timescale".to_string(), timescale],
-        vec!["start_time".to_string(), meta.start_time.to_string()],
-        vec!["end_time".to_string(), meta.end_time.to_string()],
+        vec!["signals".into(), signal_count.to_string()],
+        vec!["timescale".into(), timescale],
+        vec!["start_time".into(), start_time.to_string()],
+        vec!["end_time".into(), end_time.to_string()],
     ];
     if pretty {
         print_table(&["Field", "Value"], &rows);
     } else {
-        for row in rows { println!("{}\t{}", row[0], row[1]); }
-    }
-}
-
-fn handle_meta(vcd: &Path, pretty: bool) -> Result<()> {
-    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
-        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
-        print_fst_metadata(opened.metadata(), pretty);
-    } else {
-        let opened = OpenedVcd::open(vcd)?;
-        let meta = opened.metadata()?;
-        print_metadata(meta.as_ref(), pretty);
+        for row in rows {
+            println!("{}\t{}", row[0], row[1]);
+        }
     }
     Ok(())
 }
@@ -372,39 +307,71 @@ fn handle_extract(
     signals_file: Option<PathBuf>,
     window: TimeWindow,
     pretty: bool,
+    hint: WaveformFormatHint,
 ) -> Result<()> {
     let names = collect_signal_names(&signals, signals_file.as_deref())?;
-    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
-        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
-        let sizes = opened
-            .signals()
-            .iter()
-            .map(|signal| (signal.name.clone(), signal.width))
-            .collect::<HashMap<_, _>>();
-        let events = opened.extract(&names, window).map_err(|error| anyhow::anyhow!(error))?;
-        emit_time_aligned(
-            events.into_iter().map(Ok::<TimeValue, FstError>),
-            &names,
-            &sizes,
-            pretty,
-        )?;
-        return Ok(());
-    }
-    let opened = OpenedVcd::open(vcd)?;
-    let missing = names
-        .iter()
-        .filter(|name| opened.signal(name).is_none())
-        .cloned()
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        bail!("Signals not found in VCD: {}", missing.join(", "));
-    }
+    let opened = open_waveform(vcd, hint)?;
     let sizes = names
         .iter()
-        .filter_map(|name| opened.signal(name).map(|signal| (name.clone(), signal.size())))
+        .filter_map(|name| opened.width(name).map(|width| (name.clone(), width)))
         .collect::<HashMap<_, _>>();
-    let iter = opened.extract(&names, window, &QueryContext::legacy_unlimited())?;
-    emit_time_aligned(iter, &names, &sizes, pretty)?;
+    if sizes.len() != names.len() {
+        let missing = names
+            .iter()
+            .filter(|name| !sizes.contains_key(*name))
+            .cloned()
+            .collect::<Vec<_>>();
+        let format = if opened.format() == WaveformFormat::Vcd {
+            "VCD"
+        } else {
+            "FST"
+        };
+        bail!("Signals not found in {format}: {}", missing.join(", "));
+    }
+    let headers: Vec<String> = std::iter::once("time".to_string())
+        .chain(names.iter().cloned())
+        .collect();
+    let mut last_values = names
+        .iter()
+        .map(|name| (name.clone(), String::new()))
+        .collect::<HashMap<_, _>>();
+    let mut current_time = None;
+    let mut rows = Vec::new();
+    if !pretty {
+        println!("{}", headers.join("\t"));
+    }
+    let emit = |time: u64, values: &HashMap<String, String>, rows: &mut Vec<Vec<String>>| {
+        let row = std::iter::once(time.to_string())
+            .chain(names.iter().map(|name| values[name].clone()))
+            .collect::<Vec<_>>();
+        if pretty {
+            rows.push(row);
+        } else {
+            println!("{}", row.join("\t"));
+        }
+    };
+    opened.visit_changes(&names, window, &QueryContext::legacy_unlimited(), |event| {
+        if let Some(time) = current_time
+            && time != event.time
+        {
+            emit(time, &last_values, &mut rows);
+        }
+        current_time = Some(event.time);
+        last_values.insert(
+            event.signal.clone(),
+            format_value_for_signal(&event.value, sizes[&event.signal]),
+        );
+        Ok(())
+    })?;
+    if let Some(time) = current_time {
+        emit(time, &last_values, &mut rows);
+    }
+    if pretty {
+        print_table(
+            &headers.iter().map(String::as_str).collect::<Vec<_>>(),
+            &rows,
+        );
+    }
     Ok(())
 }
 
@@ -414,49 +381,31 @@ fn handle_toggle(
     signals_file: Option<PathBuf>,
     window: TimeWindow,
     pretty: bool,
+    hint: WaveformFormatHint,
 ) -> Result<()> {
     let names = collect_signal_names(&signals, signals_file.as_deref())?;
-    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
-        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
-        let events = opened.extract(&names, window).map_err(|error| anyhow::anyhow!(error))?;
-        let mut counts: HashMap<String, usize> = names.iter().map(|name| (name.clone(), 0)).collect();
-        let mut previous: HashMap<String, String> = HashMap::new();
-        for event in events {
-            let value = format_value_for_signal(&event.value, 1);
-            if let Some(old) = previous.get(&event.signal) {
-                if old != &value { *counts.entry(event.signal.clone()).or_default() += 1; }
-            }
-            previous.insert(event.signal, value);
-        }
-        let headers = vec!["signal", "toggles"];
-        let rows: Vec<Vec<String>> = names.iter().map(|name| vec![name.clone(), counts[name].to_string()]).collect();
-        if pretty { print_table(&headers, &rows); } else {
-            println!("{}", headers.join("\t"));
-            for row in rows { println!("{}", row.join("\t")); }
-        }
-        return Ok(());
-    }
-    let opened = OpenedVcd::open(vcd)?;
-    let toggle_counts = opened.count_toggles(
+    let counts = open_waveform(vcd, hint)?.count_toggles(
         &names,
         window,
         &QueryContext::legacy_unlimited(),
     )?;
-
-    let headers = vec!["signal", "toggles"];
-    let rows: Vec<Vec<String>> = names.iter().map(|n| {
-        vec![n.clone(), toggle_counts.get(n).copied().unwrap_or(0).to_string()]
-    }).collect();
-
+    let rows = names
+        .iter()
+        .map(|name| {
+            vec![
+                name.clone(),
+                counts.get(name).copied().unwrap_or(0).to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
     if pretty {
-        print_table(&headers, &rows);
+        print_table(&["signal", "toggles"], &rows);
     } else {
-        println!("{}", headers.join("\t"));
-        for row in &rows {
+        println!("signal\ttoggles");
+        for row in rows {
             println!("{}", row.join("\t"));
         }
     }
-
     Ok(())
 }
 
@@ -467,60 +416,36 @@ fn handle_find(
     occurrence: usize,
     window: TimeWindow,
     pretty: bool,
+    hint: WaveformFormatHint,
 ) -> Result<()> {
-    if signal.split(',').filter(|s| !s.trim().is_empty()).count() != 1 {
+    if signal
+        .split(',')
+        .filter(|part| !part.trim().is_empty())
+        .count()
+        != 1
+    {
         bail!("Provide exactly one signal for find (no comma-separated lists).");
     }
-
-    let parsed_value = parse_target_value(&value);
-    if detect_waveform_format(vcd, WaveformFormatHint::Auto)? == WaveformFormat::Fst {
-        let opened = OpenedFst::open(vcd).map_err(|error| anyhow::anyhow!(error))?;
-        let size_bits = opened
-            .signals()
-            .iter()
-            .find(|candidate| candidate.name == signal)
-            .map(|candidate| candidate.width)
-            .ok_or_else(|| anyhow::anyhow!("FST signal not found: {signal}"))?;
-        let events = opened.extract(&[signal.clone()], window).map_err(|error| anyhow::anyhow!(error))?;
-        let target = parsed_value.normalize();
-        let event = events.into_iter().filter(|event| event.value.normalize() == target).nth(occurrence.saturating_sub(1));
-        let event = event.ok_or_else(|| anyhow::anyhow!("No matching occurrence found in the specified window."))?;
-        let formatted_value = format_value_for_signal(&event.value, size_bits);
-        let headers = vec!["time".to_string(), signal.clone()];
-        let row = vec![event.time.to_string(), formatted_value];
-        if pretty {
-            let header_refs: Vec<&str> = headers.iter().map(|h| h.as_str()).collect();
-            print_table(&header_refs, &[row]);
-        } else {
-            println!("{}", headers.join("\t"));
-            println!("{}", row.join("\t"));
-        }
-        return Ok(());
-    }
-    let opened = OpenedVcd::open(vcd)?;
-    let (event, size_bits) = opened.find_nth_occurrence(
+    let (event, width) = open_waveform(vcd, hint)?.find_nth_occurrence(
         &signal,
-        parsed_value,
+        parse_target_value(&value),
         occurrence,
         window,
         &QueryContext::legacy_unlimited(),
     )?;
-    let event = match event {
-        Some(e) => e,
-        None => bail!("No matching occurrence found in the specified window."),
-    };
-
-    let formatted_value = format_value_for_signal(&event.value, size_bits);
-    let headers = vec!["time".to_string(), signal.clone()];
-    let row = vec![event.time.to_string(), formatted_value];
+    let event = event
+        .ok_or_else(|| anyhow::anyhow!("No matching occurrence found in the specified window."))?;
+    let headers = ["time", signal.as_str()];
+    let row = vec![
+        event.time.to_string(),
+        format_value_for_signal(&event.value, width),
+    ];
     if pretty {
-        let header_refs: Vec<&str> = headers.iter().map(|h| h.as_str()).collect();
-        print_table(&header_refs, &[row]);
+        print_table(&headers, &[row]);
     } else {
         println!("{}", headers.join("\t"));
         println!("{}", row.join("\t"));
     }
-
     Ok(())
 }
 
@@ -528,10 +453,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     configure_logging(&cli.global_args.log_level);
     let pretty = cli.global_args.pretty;
+    let hint = cli.global_args.format.into();
 
     match cli.command {
-        Commands::List { vcd, filter } => handle_list(&vcd, filter, pretty),
-        Commands::Meta { vcd } => handle_meta(&vcd, pretty),
+        Commands::List { vcd, filter } => handle_list(&vcd, filter, pretty, hint),
+        Commands::Meta { vcd } => handle_meta(&vcd, pretty, hint),
         Commands::Extract {
             vcd,
             signals,
@@ -540,7 +466,7 @@ fn main() -> Result<()> {
             end,
         } => {
             let window = TimeWindow { start, end };
-            handle_extract(&vcd, signals, signals_file, window, pretty)
+            handle_extract(&vcd, signals, signals_file, window, pretty, hint)
         }
         Commands::Toggle {
             vcd,
@@ -550,7 +476,7 @@ fn main() -> Result<()> {
             end,
         } => {
             let window = TimeWindow { start, end };
-            handle_toggle(&vcd, signals, signals_file, window, pretty)
+            handle_toggle(&vcd, signals, signals_file, window, pretty, hint)
         }
         Commands::Find {
             vcd,
@@ -561,7 +487,7 @@ fn main() -> Result<()> {
             end,
         } => {
             let window = TimeWindow { start, end };
-            handle_find(&vcd, signal, value, occurrence, window, pretty)
+            handle_find(&vcd, signal, value, occurrence, window, pretty, hint)
         }
         Commands::Compare {
             reference,
@@ -585,13 +511,11 @@ fn main() -> Result<()> {
                 time_window: TimeWindow { start, end },
             };
 
-            let reference = OpenedVcd::open(&reference)?;
-            let actual = OpenedVcd::open(&actual)?;
-            let result = reference.compare(
-                &actual,
-                &options,
-                &QueryContext::legacy_unlimited(),
-            )?;
+            let reference = OpenedWaveform::open_with_hint(&reference, hint)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            let actual = OpenedWaveform::open_with_hint(&actual, hint)
+                .map_err(|error| anyhow::anyhow!(error))?;
+            let result = reference.compare(&actual, &options, &QueryContext::legacy_unlimited())?;
 
             handle_compare(&result, output.as_deref())
         }
@@ -630,6 +554,7 @@ fn main() -> Result<()> {
             };
             runtime.validate()?;
             service.validate()?;
+            detect_waveform_format(&vcd, hint)?;
             if !socket.is_absolute() {
                 bail!("--socket must be an absolute path");
             }
@@ -639,7 +564,10 @@ fn main() -> Result<()> {
     }
 }
 
-fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option<&str>) -> Result<()> {
+fn handle_compare(
+    result: &vcd_tools_rs::ComparisonResult,
+    output_format: Option<&str>,
+) -> Result<()> {
     let format = output_format.unwrap_or("default");
 
     match format {
@@ -655,16 +583,18 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
             if result.passed {
                 println!("✅ PASS: All {} signals match", result.common_signals.len());
             } else {
-                println!("❌ FAIL: {}/{} signals have mismatches ({} total)",
+                println!(
+                    "❌ FAIL: {}/{} signals have mismatches ({} total)",
                     result.signals_with_mismatches,
                     result.common_signals.len(),
-                    result.total_mismatches);
+                    result.total_mismatches
+                );
             }
         }
         _ => {
             // Default detailed format
             println!("==========================================");
-            println!("VCD Comparison Results");
+            println!("Waveform Comparison Results");
             println!("==========================================");
             println!();
             println!("Reference: {}", result.file1);
@@ -701,8 +631,10 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
             println!();
 
             // Group mismatches by signal
-            let mut mismatches_by_signal: std::collections::HashMap<&String, Vec<&vcd_tools_rs::SignalMismatch>> =
-                std::collections::HashMap::new();
+            let mut mismatches_by_signal: std::collections::HashMap<
+                &String,
+                Vec<&vcd_tools_rs::SignalMismatch>,
+            > = std::collections::HashMap::new();
             for mm in &result.mismatches {
                 mismatches_by_signal
                     .entry(&mm.signal_name)
@@ -711,10 +643,14 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
             }
 
             if result.passed {
-                println!("All common signals match ({} total).", result.common_signals.len());
+                println!(
+                    "All common signals match ({} total).",
+                    result.common_signals.len()
+                );
                 println!();
             } else {
-                let mut mismatch_signals: Vec<&String> = mismatches_by_signal.keys().copied().collect();
+                let mut mismatch_signals: Vec<&String> =
+                    mismatches_by_signal.keys().copied().collect();
                 mismatch_signals.sort();
                 for signal_name in mismatch_signals {
                     let mismatches = mismatches_by_signal
@@ -729,8 +665,10 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
                         } else {
                             "❌ MISMATCH"
                         };
-                        println!("  Time #{}: Ref='{}' | Actual='{}' {}",
-                            mm.time, val1_str, val2_str, status);
+                        println!(
+                            "  Time #{}: Ref='{}' | Actual='{}' {}",
+                            mm.time, val1_str, val2_str, status
+                        );
                     }
                     if mismatches.len() > 10 {
                         println!("  ... and {} more", mismatches.len() - 10);
@@ -740,7 +678,10 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
                 }
                 println!(
                     "Matched signals: {} / {}",
-                    result.common_signals.len().saturating_sub(result.signals_with_mismatches),
+                    result
+                        .common_signals
+                        .len()
+                        .saturating_sub(result.signals_with_mismatches),
                     result.common_signals.len()
                 );
                 println!();
@@ -754,14 +695,16 @@ fn handle_compare(result: &vcd_tools_rs::ComparisonResult, output_format: Option
             if result.passed {
                 println!("✅ SUCCESS: All signal values match!");
                 println!();
-                println!("The two VCD files are equivalent.");
+                println!("The two waveform files are equivalent.");
             } else {
                 println!("❌ FAILURES FOUND");
                 println!();
                 println!("Total mismatches: {}", result.total_mismatches);
-                println!("Signals with mismatches: {} / {}",
+                println!(
+                    "Signals with mismatches: {} / {}",
                     result.signals_with_mismatches,
-                    result.common_signals.len());
+                    result.common_signals.len()
+                );
             }
             println!();
         }

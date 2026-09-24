@@ -71,7 +71,10 @@ pub enum QueryErrorCode {
     StaleSource,
     QueueFull,
     SourceUnavailable,
+    SignalNotFound,
     Vcd,
+    Fst,
+    UnsupportedWaveform,
     Internal,
 }
 
@@ -84,7 +87,10 @@ impl QueryErrorCode {
             Self::StaleSource => "STALE_SOURCE",
             Self::QueueFull => "QUEUE_FULL",
             Self::SourceUnavailable => "SOURCE_UNAVAILABLE",
+            Self::SignalNotFound => "SIGNAL_NOT_FOUND",
             Self::Vcd => "VCD_ERROR",
+            Self::Fst => "FST_ERROR",
+            Self::UnsupportedWaveform => "UNSUPPORTED_WAVEFORM",
             Self::Internal => "INTERNAL",
         }
     }
@@ -107,7 +113,10 @@ pub enum QueryError {
     StaleSource(VcdError),
     QueueFull,
     SourceUnavailable(io::Error),
+    SignalNotFound(String),
     Vcd(VcdError),
+    Fst(String),
+    UnsupportedWaveform(String),
     Internal(String),
 }
 
@@ -120,7 +129,10 @@ impl QueryError {
             Self::StaleSource(_) => QueryErrorCode::StaleSource,
             Self::QueueFull => QueryErrorCode::QueueFull,
             Self::SourceUnavailable(_) => QueryErrorCode::SourceUnavailable,
+            Self::SignalNotFound(_) => QueryErrorCode::SignalNotFound,
             Self::Vcd(_) => QueryErrorCode::Vcd,
+            Self::Fst(_) => QueryErrorCode::Fst,
+            Self::UnsupportedWaveform(_) => QueryErrorCode::UnsupportedWaveform,
             Self::Internal(_) => QueryErrorCode::Internal,
         }
     }
@@ -171,7 +183,12 @@ impl fmt::Display for QueryError {
             Self::StaleSource(error) => error.fmt(formatter),
             Self::QueueFull => formatter.write_str("query queue is full"),
             Self::SourceUnavailable(error) => write!(formatter, "source unavailable: {error}"),
+            Self::SignalNotFound(signal) => write!(formatter, "signal not found: {signal}"),
             Self::Vcd(error) => error.fmt(formatter),
+            Self::Fst(message) => write!(formatter, "FST query error: {message}"),
+            Self::UnsupportedWaveform(message) => {
+                write!(formatter, "unsupported waveform: {message}")
+            }
             Self::Internal(message) => write!(formatter, "internal query error: {message}"),
         }
     }
@@ -207,9 +224,12 @@ pub(crate) fn into_vcd_error(error: QueryError) -> VcdError {
         QueryError::SourceUnavailable(error) => VcdError::Io(error),
         QueryError::Cancelled => VcdError::Parse("query cancelled".to_string()),
         QueryError::DeadlineExceeded => VcdError::Parse("query deadline exceeded".to_string()),
-        QueryError::LimitExceeded { .. } | QueryError::QueueFull | QueryError::Internal(_) => {
-            VcdError::Parse(error.to_string())
-        }
+        QueryError::LimitExceeded { .. }
+        | QueryError::QueueFull
+        | QueryError::SignalNotFound(_)
+        | QueryError::Fst(_)
+        | QueryError::UnsupportedWaveform(_)
+        | QueryError::Internal(_) => VcdError::Parse(error.to_string()),
     }
 }
 

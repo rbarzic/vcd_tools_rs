@@ -681,3 +681,57 @@ fn spawned_native_serve_ping_sigterm_and_socket_cleanup() {
     }
     assert!(!socket.exists(), "binary server left socket after SIGTERM");
 }
+
+#[test]
+fn fst_describe_extract_and_find_work_over_real_socket() {
+    let server = TestServer::start_with_fixture("tests/fixtures/fst/tiny.fst");
+    let mut client = server.connect();
+
+    client.send_value(&request("describe", "describe", json!({})));
+    let describe = client.response("describe");
+    assert_eq!(describe[0]["result"]["source_format"], "fst");
+    assert_eq!(
+        describe[0]["result"]["timescale"],
+        json!({"magnitude":"1","unit":"ns"})
+    );
+
+    client.send_value(&request(
+        "extract",
+        "extract",
+        json!({"signals":["top.a","top.a_alias"]}),
+    ));
+    let extract = client.response("extract");
+    let rows = extract
+        .iter()
+        .filter_map(|frame| frame["rows"].as_array())
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(extract.last().unwrap()["complete"], true);
+
+    client.send_value(&request(
+        "find",
+        "find",
+        json!({"signal":"top.a","value":"1","occurrence":"1"}),
+    ));
+    let find = client.response("find");
+    assert_eq!(find[0]["result"]["time"], "5");
+}
+
+#[test]
+fn corrupt_fst_signal_data_reports_fst_error() {
+    for (offset, id) in [(435usize, "panic-path"), (441usize, "read-error-path")] {
+        let mut bytes = fs::read("tests/fixtures/fst/tiny.fst").unwrap();
+        // These bytes are inside the compressed dynamic-alias signal-data payload;
+        // hierarchy/header parsing remains valid while signal reading fails.
+        bytes[offset] ^= 0xff;
+        let mut fixture = tempfile::NamedTempFile::new().unwrap();
+        fixture.write_all(&bytes).unwrap();
+        let server = TestServer::start_with_fixture(fixture.path().to_str().unwrap());
+        let mut client = server.connect();
+        client.send_value(&request(id, "extract", json!({"signals":["top.a"]})));
+        let response = client.response(id);
+        assert_eq!(response.last().unwrap()["error"]["code"], "FST_ERROR");
+        assert_ne!(response.last().unwrap()["error"]["code"], "VCD_ERROR");
+    }
+}

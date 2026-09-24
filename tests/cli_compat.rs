@@ -214,7 +214,7 @@ fn compare_difference_is_successful_in_compact_and_default_formats() {
     let default = run(&["compare", SEMANTICS, CHANGED, "--signals-only", "top.a"]);
     assert!(default.status.success(), "{}", stderr(&default));
     let text = stdout(&default);
-    assert!(text.contains("VCD Comparison Results"));
+    assert!(text.contains("Waveform Comparison Results"));
     assert!(text.contains("Signal: top.a"));
     assert!(text.contains("Time #15: Ref='1' | Actual='0' ❌ MISMATCH"));
     assert!(text.contains("Total mismatches: 1"));
@@ -240,4 +240,12 @@ fn extract_without_signals_fails_before_writing_output() {
         stderr(&output),
         "Error: At least one --signal or --signals-file entry is required\n"
     );
+}
+
+#[test]
+fn explicit_format_override_accepts_match_and_rejects_mismatch() {
+    let matched = run(&["--format", "fst", "list", "tests/fixtures/fst/tiny.fst"]);
+    assert!(matched.status.success(), "{}", stderr(&matched));
+    let mismatch = run(&["--format", "vcd", "list", "tests/fixtures/fst/tiny.fst"]);
+    assert!(!mismatch.status.success());
 }

@@ -1,6 +1,6 @@
 # vcd_tools_rs CLI Reference
 
-> **Current format support:** The query commands documented below (`list`, `meta`, `extract`, `toggle`, `find`, `compare`, and `serve`) currently accept VCD files only. The Rust library also provides content-based VCD/FST detection, but FST query backends are not implemented yet. A `.fst` extension alone does not make the installed CLI support FST. See [`FST_PLAN.md`](FST_PLAN.md) for the implementation roadmap.
+> **Current format support:** `list`, `meta`, `extract`, `toggle`, `find`, `compare`, and Unix `serve` auto-detect VCD and FST by content. `compare` supports all VCD/FST pairings when physical timescales match. `vcd2trace` remains VCD-only. Whole-file gzip-wrapped and incomplete external-hierarchy FST files are not supported.
 
 A fast streaming VCD (Value Change Dump) analysis tool written in Rust, also available as a Python library via `pip install vcd-tools`.
 
@@ -8,12 +8,12 @@ A fast streaming VCD (Value Change Dump) analysis tool written in Rust, also ava
 
 | Surface | VCD | FST |
 |---------|-----|-----|
-| Native CLI queries | Supported | Not yet supported |
-| Python query functions | Supported | Not yet supported |
-| Unix `serve` mode | Supported | Not yet supported |
+| Native CLI queries | Supported | Supported |
+| Python query functions | Supported | Supported |
+| Unix `serve` mode | Supported | Supported |
 | Rust format detection API | Supported | Supported |
 
-Format detection is content-based rather than extension-based. It validates an input as VCD or FST, but detection does not add FST support to the query commands. Use the Rust `detect_waveform_format` API when you need to classify an input before selecting a backend.
+Format detection is content-based rather than extension-based. The same detection opens either backend for query operations. Use the additive Rust `OpenedWaveform` facade or `detect_waveform_format` when integrating directly.
 
 ---
 
@@ -79,6 +79,7 @@ vcd_tools_rs meta simulation.vcd --pretty
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--log-level <LEVEL>` | `info` | Logging verbosity: `error`, `warn`, `info`, `debug` |
+| `--format <FORMAT>` | `auto` | Content detection or an explicit `vcd`/`fst` input assertion; mismatches fail |
 | `--pretty` | false | Render output as formatted tables instead of tab-separated values; native CLI accepts it before or after the subcommand |
 
 ---
@@ -302,7 +303,7 @@ vcd_tools_rs compare reference.vcd actual.vcd --start 0 --end 1000000
 
 ### serve
 
-Run the experimental native Unix-domain query server for one VCD. FST inputs are not supported by server mode yet.
+Run the experimental native Unix-domain query server for one VCD or FST. `describe` reports the selected `source_format`.
 
 > `serve` is available in native Linux/macOS builds and through the pip-installed console on Unix. Windows does not expose Unix socket server mode.
 
@@ -328,7 +329,7 @@ Stop the foreground server with Ctrl-C. The owned socket is removed during grace
 
 ## Python API
 
-The Python query functions documented below accept VCD files only. FST detection is currently available through the Rust API, not through the Python query functions.
+The Python query functions documented below auto-detect VCD or FST inputs. `compare` supports same- and cross-format pairs when physical timescales match.
 
 Install with `pip install vcd-tools`, then:
 
@@ -572,7 +573,8 @@ The tool exits with a non-zero status and prints an error for:
 
 ## Performance Notes
 
-- All commands stream the VCD body; memory usage is independent of file size.
+- VCD and FST extraction stream selected changes through bounded callback paths; Python list-returning APIs necessarily collect their returned rows.
+- FST opening enforces limits on input size, hierarchy depth, declarations, retained names, and catalog ownership.
 - Release builds (`cargo build --release`) are significantly faster than debug builds.
 - Listing filtered signals is ~6× faster than Python VCD parsers in local measurements.
 - The pip-installed `vcd_tools_rs` command is backed by the same compiled Rust code as the native binary — no performance difference.

@@ -37,6 +37,7 @@ pub enum ProtocolErrorCode {
     StaleSource,
     SourceUnavailable,
     ParseError,
+    FstError,
     Internal,
 }
 
@@ -57,6 +58,7 @@ impl ProtocolErrorCode {
             Self::StaleSource => "STALE_SOURCE",
             Self::SourceUnavailable => "SOURCE_UNAVAILABLE",
             Self::ParseError => "PARSE_ERROR",
+            Self::FstError => "FST_ERROR",
             Self::Internal => "INTERNAL",
         }
     }
@@ -866,6 +868,7 @@ pub struct DistributionCapabilities {
 pub struct DescribeResult {
     pub protocol: String,
     pub generation: String,
+    pub source_format: String,
     pub signal_count: String,
     pub timescale: Option<WireTimescale>,
     pub source_size: String,
@@ -1123,7 +1126,25 @@ pub fn protocol_error_from_query(error: &QueryError) -> ProtocolError {
             json!({}),
             true,
         ),
+        QueryError::SignalNotFound(signal) => ProtocolError::new(
+            ProtocolErrorCode::SignalNotFound,
+            "one or more signals were not found",
+            json!({"signals":[signal]}),
+            false,
+        ),
         QueryError::Vcd(error) => protocol_error_from_vcd(error),
+        QueryError::Fst(_) => ProtocolError::new(
+            ProtocolErrorCode::FstError,
+            "FST parse error",
+            json!({"format":"fst"}),
+            false,
+        ),
+        QueryError::UnsupportedWaveform(_) => ProtocolError::new(
+            ProtocolErrorCode::ParseError,
+            "unsupported waveform input",
+            json!({}),
+            false,
+        ),
         QueryError::Internal(_) => ProtocolError::new(
             ProtocolErrorCode::Internal,
             "internal server error",

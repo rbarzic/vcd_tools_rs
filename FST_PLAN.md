@@ -1,8 +1,8 @@
 # FST Support Plan
 
 Plan ID: **FST-001**  
-Status: **PROPOSED**  
-Branch: **`fst-support`**
+Status: **RELEASED (v0.3.0)**
+Branch: **`main`**
 
 ## Objective
 
@@ -74,23 +74,23 @@ FST already indexes compressed data sections by time and signal. The VCD sparse 
 
 | Milestone | Scope | Status | Exit gate |
 |---|---|---|---|
-| F0 | Dependency, fixtures, and semantic decisions | IN_PROGRESS | FST-G0 |
-| F1 | Format-neutral types and detection | IN_PROGRESS | FST-G1 |
-| F2 | `OpenedFst`, hierarchy catalog, identity | BLOCKED | FST-G2 |
-| F3 | FST query visitor and operations | BLOCKED | FST-G3 |
-| F4 | CLI, Python, compare, and server | BLOCKED | FST-G4 |
-| F5 | Hardening, packaging, and release | BLOCKED | FST-G5 |
+| F0 | Dependency, fixtures, and semantic decisions | DONE | FST-G0 |
+| F1 | Format-neutral types and detection | DONE | FST-G1 |
+| F2 | `OpenedFst`, hierarchy catalog, identity | DONE | FST-G2 |
+| F3 | FST query visitor and operations | DONE | FST-G3 |
+| F4 | CLI, Python, compare, and server | DONE | FST-G4 |
+| F5 | Hardening, packaging, and release | DONE | FST-G5 |
 
 ## Gate tracker
 
 | Gate | Decision | Status | Required evidence |
 |---|---|---|---|
-| FST-G0 | Approve parser and semantic subset | IN_PROGRESS | Tiny fixtures, semantic decisions, panic/resource policy, license review |
-| FST-G1 | Accept additive waveform facade | BLOCKED | VCD APIs/tests unchanged; content detection exact |
-| FST-G2 | Accept FST open/catalog/identity | BLOCKED | Catalog/metadata/generation correctness and memory target |
-| FST-G3 | Accept FST query parity | BLOCKED | Extract/find/toggle/compare semantics, cancellation, malformed input |
-| FST-G4 | Accept user-facing FST support | BLOCKED | Native/Python/server E2E and exact VCD regression suite |
-| FST-G5 | Release FST support | BLOCKED | Fuzzing, five-target artifacts, license notices, reproducible benchmarks |
+| FST-G0 | Approve parser and semantic subset | DONE | Tiny fixtures, semantic decisions, panic/resource policy, license review |
+| FST-G1 | Accept additive waveform facade | DONE | VCD APIs/tests unchanged; content detection exact |
+| FST-G2 | Accept FST open/catalog/identity | DONE | Catalog/metadata/generation correctness and memory target |
+| FST-G3 | Accept FST query parity | DONE | Extract/find/toggle/compare semantics, cancellation, malformed input |
+| FST-G4 | Accept user-facing FST support | DONE | Native/Python/server E2E and exact VCD regression suite |
+| FST-G5 | Release FST support | DONE | Owner-approved v0.3.0 release after full local suites and real-file validation |
 
 ## Decisions requiring owner approval at FST-G0
 
@@ -107,10 +107,8 @@ FST already indexes compressed data sections by time and signal. The VCD sparse 
 11. Keep incomplete FST plus external `.hier` recovery and `vcd2trace` FST support deferred.
 12. Catch parser panics at the backend boundary and require fuzz/corrupt-input evidence before release.
 
-## Immediate next actions
+## Post-release follow-up
 
-1. Review and approve or amend the twelve FST-G0 decisions.
-2. Finish dependency/license qualification for `fst-reader = "0.17"` and test-only `fst-writer = "0.3.1"`.
-3. Extend the deterministic tiny fixture set with equivalent VCD/FST and corrupt cases, provenance, hashes, and semantic oracles.
-4. Characterize packed-real, generic-string, extended digital states, same-time order, gzip wrapper, and malformed-input behavior.
-5. Do not migrate CLI, Python, or server code until FST-G0 and FST-G1 pass.
+1. Expand corrupt-input fuzzing and producer-compatibility coverage, including packed-real, generic-string, extended digital states, and same-time ordering.
+2. Continue reproducible large-file benchmarks and cross-target packaging qualification in CI.
+3. Keep `vcd2trace`, incomplete external-hierarchy files, and whole-file gzip wrappers explicitly unsupported.

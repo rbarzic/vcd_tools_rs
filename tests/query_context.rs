@@ -148,3 +148,17 @@ fn real_source_mutation_maps_to_stale_source_without_string_matching() {
         "I/O error: VCD source does not match the opened generation"
     );
 }
+
+#[test]
+fn generic_fst_errors_have_format_neutral_stable_codes() {
+    use vcd_tools_rs::query::{QueryError, QueryErrorCode};
+    assert_eq!(QueryError::Fst("bad".into()).code(), QueryErrorCode::Fst);
+    assert_eq!(
+        QueryError::SignalNotFound("top.missing".into()).code(),
+        QueryErrorCode::SignalNotFound
+    );
+    assert_eq!(
+        QueryError::UnsupportedWaveform("gzip".into()).code(),
+        QueryErrorCode::UnsupportedWaveform
+    );
+}

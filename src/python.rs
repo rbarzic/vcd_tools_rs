@@ -6,6 +6,8 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use crate::opened::OpenedWaveform;
+use crate::query::QueryContext;
 #[cfg(unix)]
 use crate::server::app::run_server_until_signal;
 #[cfg(unix)]
@@ -13,18 +15,34 @@ use crate::server::runtime::RuntimeConfig;
 #[cfg(unix)]
 use crate::server::service::ServiceConfig;
 use crate::{
-    ComparisonOptions, TimeWindow, compare_vcd_files, count_toggles, extract_time_values_from_file,
-    find_nth_occurrence, list_signals_from_file, parse_target_value, read_vcd_metadata,
+    ComparisonOptions, TimeWindow, WaveformFormatHint, detect_waveform_format, parse_target_value,
 };
 
-fn to_py(e: crate::VcdError) -> PyErr {
-    PyRuntimeError::new_err(e.to_string())
+fn open_waveform(path: &str) -> PyResult<OpenedWaveform> {
+    OpenedWaveform::open(path).map_err(|error| PyRuntimeError::new_err(error.to_string()))
 }
 
-/// List signal names declared in a VCD file.
+fn query_py(error: crate::query::QueryError) -> PyErr {
+    PyRuntimeError::new_err(error.to_string())
+}
+
+#[pyfunction]
+fn assert_format(path: &str, format: &str) -> PyResult<String> {
+    let hint = match format {
+        "auto" => WaveformFormatHint::Auto,
+        "vcd" => WaveformFormatHint::Vcd,
+        "fst" => WaveformFormatHint::Fst,
+        _ => return Err(PyRuntimeError::new_err("format must be auto, vcd, or fst")),
+    };
+    detect_waveform_format(path, hint)
+        .map(|value| value.to_string())
+        .map_err(|error| PyRuntimeError::new_err(error.to_string()))
+}
+
+/// List signal names declared in a VCD or FST waveform.
 ///
 /// Args:
-///     path: Path to the VCD file.
+///     path: Path to the VCD or FST waveform.
 ///     filter: Optional substring; only signals containing it are returned.
 ///
 /// Returns:
@@ -32,25 +50,26 @@ fn to_py(e: crate::VcdError) -> PyErr {
 #[pyfunction]
 #[pyo3(signature = (path, filter=None))]
 fn list_signals(path: &str, filter: Option<&str>) -> PyResult<Vec<String>> {
-    list_signals_from_file(path, filter).map_err(to_py)
+    Ok(open_waveform(path)?.list_signals(filter))
 }
 
-/// Return metadata for a VCD file.
+/// Return metadata for a VCD or FST waveform.
 ///
 /// Returns a dict with keys:
 ///     signal_count (int), start_time (int), end_time (int),
 ///     timescale (str | None)  e.g. "1 ns"
 #[pyfunction]
 fn metadata(py: Python<'_>, path: &str) -> PyResult<PyObject> {
-    let meta = read_vcd_metadata(path).map_err(to_py)?;
+    let (signal_count, timescale, start_time, end_time) = open_waveform(path)?
+        .metadata(&QueryContext::legacy_unlimited())
+        .map_err(query_py)?;
     let d = PyDict::new(py);
-    d.set_item("signal_count", meta.signal_count)?;
-    d.set_item("start_time", meta.start_time)?;
-    d.set_item("end_time", meta.end_time)?;
+    d.set_item("signal_count", signal_count)?;
+    d.set_item("start_time", start_time)?;
+    d.set_item("end_time", end_time)?;
     d.set_item(
         "timescale",
-        meta.timescale
-            .map(|t| format!("{} {}", t.magnitude, t.unit)),
+        timescale.map(|t| format!("{} {}", t.magnitude, t.unit)),
     )?;
     Ok(d.unbind().into_any())
 }
@@ -58,7 +77,7 @@ fn metadata(py: Python<'_>, path: &str) -> PyResult<PyObject> {
 /// Extract time/value pairs for a list of signals.
 ///
 /// Args:
-///     path:    Path to the VCD file.
+///     path:    Path to the VCD or FST waveform.
 ///     signals: List of fully-qualified signal names.
 ///     start:   Optional start time (inclusive).
 ///     end:     Optional end time (inclusive).
@@ -75,7 +94,9 @@ fn extract(
     end: Option<u64>,
 ) -> PyResult<Vec<PyObject>> {
     let window = TimeWindow { start, end };
-    let values = extract_time_values_from_file(path, &signals, window).map_err(to_py)?;
+    let values = open_waveform(path)?
+        .extract(&signals, window, &QueryContext::legacy_unlimited())
+        .map_err(query_py)?;
     values
         .iter()
         .map(|tv| {
@@ -91,7 +112,7 @@ fn extract(
 /// Count value transitions (toggles) for a list of signals.
 ///
 /// Args:
-///     path:    Path to the VCD file.
+///     path:    Path to the VCD or FST waveform.
 ///     signals: List of fully-qualified signal names.
 ///     start:   Optional start time (inclusive).
 ///     end:     Optional end time (inclusive).
@@ -107,14 +128,16 @@ fn toggles(
     end: Option<u64>,
 ) -> PyResult<HashMap<String, usize>> {
     let window = TimeWindow { start, end };
-    count_toggles(path, &signals, window).map_err(to_py)
+    open_waveform(path)?
+        .count_toggles(&signals, window, &QueryContext::legacy_unlimited())
+        .map_err(query_py)
 }
 
-/// Compare two VCD files and report signal mismatches.
+/// Compare two VCD or FST waveforms and report signal mismatches.
 ///
 /// Args:
-///     file1:           Path to the first VCD file.
-///     file2:           Path to the second VCD file.
+///     file1:           Path to the first VCD or FST waveform.
+///     file2:           Path to the second VCD or FST waveform.
 ///     max_mismatches:  Optional per-signal mismatch limit.
 ///     signals:         Optional list of signal names to restrict comparison to.
 ///     ignore_unknown:  If True, treat x/z differences as matches.
@@ -149,7 +172,13 @@ fn compare(
         ignore_unknown,
         time_window: TimeWindow { start, end },
     };
-    let result = compare_vcd_files(file1, file2, &options).map_err(to_py)?;
+    let result = open_waveform(file1)?
+        .compare(
+            &open_waveform(file2)?,
+            &options,
+            &QueryContext::legacy_unlimited(),
+        )
+        .map_err(query_py)?;
 
     let d = PyDict::new(py);
     d.set_item("passed", result.passed)?;
@@ -182,7 +211,7 @@ fn compare(
 /// Find the Nth occurrence of a signal reaching a target value.
 ///
 /// Args:
-///     path:       Path to the VCD file.
+///     path:       Path to the VCD or FST waveform.
 ///     signal:     Fully-qualified signal name.
 ///     value:      Target value string (decimal, "0x…" hex, or "x"/"z").
 ///     occurrence: Which occurrence to find (default 1).
@@ -205,8 +234,15 @@ fn find(
 ) -> PyResult<PyObject> {
     let window = TimeWindow { start, end };
     let target = parse_target_value(value);
-    let (result, _size) =
-        find_nth_occurrence(path, signal, target, occurrence, window).map_err(to_py)?;
+    let (result, _size) = open_waveform(path)?
+        .find_nth_occurrence(
+            signal,
+            target,
+            occurrence,
+            window,
+            &QueryContext::legacy_unlimited(),
+        )
+        .map_err(query_py)?;
 
     let d = PyDict::new(py);
     match result {
@@ -289,6 +325,7 @@ fn serve(
 
 #[pymodule]
 fn vcd_tools(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(assert_format, m)?)?;
     m.add_function(wrap_pyfunction!(list_signals, m)?)?;
     m.add_function(wrap_pyfunction!(metadata, m)?)?;
     m.add_function(wrap_pyfunction!(extract, m)?)?;

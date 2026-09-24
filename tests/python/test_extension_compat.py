@@ -14,6 +14,7 @@ import vcd_tools
 ROOT = Path(__file__).resolve().parents[2]
 SEMANTICS = str(ROOT / "tests" / "fixtures" / "query_semantics.vcd")
 CHANGED = str(ROOT / "tests" / "fixtures" / "query_semantics_changed.vcd")
+FST = str(ROOT / "tests" / "fixtures" / "fst" / "tiny.fst")
 
 
 def test_exported_module_functions_and_signatures_are_stable():
@@ -117,8 +118,38 @@ def test_compare_dictionary_shape_is_stable():
     }
 
 
+
+def test_existing_python_queries_accept_fst():
+    assert vcd_tools.list_signals(FST) == ["top.a", "top.a_alias"]
+    assert vcd_tools.metadata(FST) == {
+        "signal_count": 2,
+        "start_time": 0,
+        "end_time": 5,
+        "timescale": "1 ns",
+    }
+    assert vcd_tools.extract(FST, ["top.a"]) == [
+        {"signal": "top.a", "time": 0, "value": "0"},
+        {"signal": "top.a", "time": 5, "value": "1"},
+    ]
+    assert vcd_tools.toggles(FST, ["top.a"]) == {"top.a": 1}
+    assert vcd_tools.find(FST, "top.a", "1") == {
+        "found": True,
+        "signal": "top.a",
+        "time": 5,
+        "value": "1",
+    }
+    assert vcd_tools.compare(FST, FST)["passed"] is True
+
+
 def test_vcd_errors_remain_runtime_errors_with_stable_messages():
     with pytest.raises(RuntimeError, match=r"^signals not found in VCD: top\.missing$"):
         vcd_tools.extract(SEMANTICS, ["top.missing"])
     with pytest.raises(RuntimeError, match=r"^occurrence must be >= 1$"):
         vcd_tools.find(SEMANTICS, "top.a", "1", occurrence=0)
+
+def test_fst_format_assertion():
+    from vcd_tools.vcd_tools import assert_format
+
+    assert assert_format("tests/fixtures/fst/tiny.fst", "fst") == "fst"
+    with pytest.raises(RuntimeError):
+        assert_format("tests/fixtures/fst/tiny.fst", "vcd")

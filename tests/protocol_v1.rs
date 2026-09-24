@@ -43,6 +43,7 @@ fn golden_responses() -> Vec<ResponseFrame> {
     let describe = DescribeResult {
         protocol: "1".into(),
         generation: "7".into(),
+        source_format: "vcd".into(),
         signal_count: "193730".into(),
         timescale: Some(WireTimescale {
             magnitude: "1".into(),
@@ -618,6 +619,11 @@ fn query_and_vcd_errors_map_to_frozen_protocol_codes() {
         (
             QueryError::Vcd(VcdError::MissingSignal("tb.missing".into())),
             ProtocolErrorCode::SignalNotFound,
+            false,
+        ),
+        (
+            QueryError::Fst("corrupt".into()),
+            ProtocolErrorCode::FstError,
             false,
         ),
         (
